@@ -1,0 +1,167 @@
+site_name: Drupal 11 Headless & Custom Coding Guide
+site_url: https://amitmaity.github.io/drupal-docs/
+repo_url: https://github.com/amitmaity/drupal-docs
+repo_name: amitmaity/drupal-docs
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+  palette:
+    - scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Introduction:
+    - intro/index.md
+    - What Changed in Drupal 11: intro/what-changed.md
+    - Drupal 11 Architecture: intro/architecture.md
+    - Modern PHP Standards: intro/modern-php.md
+    - Symfony Foundation: intro/symfony-foundation.md
+    - Composer-First Development: intro/composer-first.md
+    - Why Headless Drupal: intro/why-headless.md
+  - Getting Started:
+    - getting-started/index.md
+    - Fresh Installation: getting-started/installation.md
+    - Composer Workflows: getting-started/composer.md
+    - Project Layout: getting-started/project-layout.md
+    - Drush Basics: getting-started/drush.md
+  - Drupal Internals:
+    - internals/index.md
+    - Bootstrap Process: internals/bootstrap.md
+    - Request Lifecycle: internals/request-lifecycle.md
+    - Service Container: internals/service-container.md
+    - Routing System: internals/routing.md
+    - Entity System: internals/entity-system.md
+    - Plugin System: internals/plugin-system.md
+    - Tracing a Request: internals/tracing-request.md
+    - Debugging Services: internals/debugging-services.md
+    - Route Inspection: internals/route-inspection.md
+  - Dependency Injection:
+    - dependency-injection/index.md
+    - What DI Solves: dependency-injection/what-di-solves.md
+    - Service Container: dependency-injection/service-container.md
+    - Service Definitions: dependency-injection/service-definitions.md
+    - Constructor Injection: dependency-injection/constructor-injection.md
+    - Service Decoration: dependency-injection/service-decoration.md
+    - Tagged Services: dependency-injection/tagged-services.md
+  - Symfony Components:
+    - symfony/index.md
+    - HttpFoundation: symfony/http-foundation.md
+    - Routing: symfony/routing.md
+    - Controllers: symfony/controllers.md
+    - Event Dispatcher: symfony/event-dispatcher.md
+    - HttpKernel: symfony/http-kernel.md
+    - Serializer: symfony/serializer.md
+    - Validator: symfony/validator.md
+    - Console: symfony/console.md
+    - Messenger: symfony/messenger.md
+    - Cache: symfony/cache.md
+    - Yaml: symfony/yaml.md
+    - Translation: symfony/translation.md
+    - Security: symfony/security.md
+    - Process: symfony/process.md
+    - Filesystem: symfony/filesystem.md
+    - Mime: symfony/mime.md
+    - Dependency Injection: symfony/dependency-injection.md
+  - Custom Modules:
+    - custom-coding/index.md
+    - Module Structure: custom-coding/module-structure.md
+    - OOP & Legacy Hooks: custom-coding/hooks.md
+    - Forms API:
+      - custom-coding/forms/index.md
+      - Config Form: custom-coding/forms/config-form.md
+      - Multi-step Form: custom-coding/forms/multi-step-form.md
+      - AJAX Form: custom-coding/forms/ajax-form.md
+    - Plugin System:
+      - custom-coding/plugins/index.md
+      - Block Plugins: custom-coding/plugins/block-plugins.md
+      - Queue Workers: custom-coding/plugins/queue-workers.md
+      - Field Formatters: custom-coding/plugins/field-formatters.md
+      - Custom Plugin Types: custom-coding/plugins/custom-plugin-types.md
+    - Entity API:
+      - custom-coding/entities/index.md
+      - Content Entities: custom-coding/entities/content-entities.md
+      - Config Entities: custom-coding/entities/config-entities.md
+      - Custom Storage: custom-coding/entities/custom-storage.md
+    - Custom Field Types: custom-coding/custom-field-types.md
+    - Batch API: custom-coding/batch-api.md
+    - Queue API: custom-coding/queue-api.md
+    - Cron API: custom-coding/cron-api.md
+    - Database API: custom-coding/database-api.md
+    - Twig & Theming: custom-coding/twig-theming.md
+    - Access & Permissions: custom-coding/access-permissions.md
+    - Drush Commands: custom-coding/drush-commands.md
+    - Testing: custom-coding/testing.md
+  - Headless Drupal:
+    - headless/index.md
+    - Architecture: headless/architecture.md
+    - REST API: headless/rest-api.md
+    - JSON:API Deep Dive: headless/jsonapi.md
+    - Custom JSON APIs: headless/custom-json-apis.md
+    - Authentication:
+      - headless/auth/index.md
+      - Session Auth: headless/auth/session-auth.md
+      - Cookie Auth: headless/auth/cookie-auth.md
+      - OAuth2: headless/auth/oauth2.md
+      - JWT: headless/auth/jwt.md
+    - Drupal + Next.js: headless/nextjs.md
+    - GraphQL: headless/graphql.md
+    - Media & Images: headless/media-images.md
+    - Cache Invalidation: headless/cache-invalidation.md
+  - Caching:
+    - caching/index.md
+    - Render Cache: caching/render-cache.md
+    - Dynamic Page Cache: caching/dynamic-page-cache.md
+    - Cache Tags: caching/cache-tags.md
+    - Cache Contexts: caching/cache-contexts.md
+    - Invalidation: caching/invalidation.md
+  - Deployment:
+    - deployment/index.md
+    - GitHub Pages: deployment/github-pages.md
+    - Deploying Drupal: deployment/deploying-drupal.md
+  - Reference: reference.md
