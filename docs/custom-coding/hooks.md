@@ -328,7 +328,9 @@ Other modules implement `hook_example_module_notify()` or `#[Hook('example_modul
 !!! warning "Do not mix duplicate implementations"
     Implement each hook in **either** OOP or procedural form, not both. If both exist, behavior is undefined.
 
-!!! tip "Find hook definitions"
+!!! tip "Find hook implementations"
+    `ModuleHandler::getImplementations()` was removed in Drupal 11. Use `invokeAllWith()` to inspect which modules implement a hook:
+
     ```bash
-    ddev drush php:eval "print_r(array_keys(\Drupal::service('module_handler')->getImplementations('cron')));"
+    ddev drush php:eval "\Drupal::service('module_handler')->invokeAllWith('cron', function (callable \$hook, string \$module) { print \$module . PHP_EOL; });"
     ```
