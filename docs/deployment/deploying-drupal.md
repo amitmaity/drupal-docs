@@ -19,17 +19,13 @@ While this guide focuses on headless Drupal development, here is a concise overv
 # 1. Install without dev dependencies
 composer install --no-dev --optimize-autoloader
 
-# 2. Import configuration
-drush config:import -y
+# 2. Run database updates, import configuration, rebuild caches
+#    and run deploy hooks, in the correct order
+#    (updatedb → config:import → cache:rebuild → deploy:hook)
+drush deploy -y
 
-# 3. Run database updates
-drush updatedb -y
-
-# 4. Clear caches
-drush cr
-
-# 5. Verify file permissions
-chmod 644 web/sites/default/settings.php
+# 3. Verify file permissions
+chmod 444 web/sites/default/settings.php
 chmod -R 755 web/sites/default/files
 ```
 
@@ -63,8 +59,12 @@ $settings['trusted_host_patterns'] = [
 ```php
 // settings.php
 $settings['reverse_proxy'] = TRUE;
+// List only your own load balancer / CDN IPs or CIDR ranges.
+// Never use $_SERVER['REMOTE_ADDR'] here: it trusts every client, so anyone
+// can spoof their IP with an X-Forwarded-For header.
 $settings['reverse_proxy_addresses'] = [
-  $_SERVER['REMOTE_ADDR'],
+  '10.0.0.10',
+  '10.0.1.0/24',
 ];
 ```
 
@@ -94,9 +94,9 @@ graph LR
     CI --> Test[PHPUnit + PHPStan]
     Test --> Build[Composer Install]
     Build --> Deploy[Deploy to Platform]
-    Deploy --> ConfigImport[drush config:import]
-    ConfigImport --> Updatedb[drush updatedb]
-    Updatedb --> CacheClear[drush cr]
+    Deploy --> Updatedb[drush updatedb]
+    Updatedb --> ConfigImport[drush config:import]
+    ConfigImport --> CacheClear[drush cr + deploy hooks]
     CacheClear --> Live[Production API Live]
 ```
 

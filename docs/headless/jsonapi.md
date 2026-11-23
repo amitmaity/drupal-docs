@@ -6,10 +6,10 @@
 
 ```bash
 drush en jsonapi -y
-curl -s https://my-site.ddev.site/jsonapi | jq '.data[] | .attributes.description'
+curl -s https://my-site.ddev.site/jsonapi | jq '.links | keys'
 ```
 
-The discovery document at `/jsonapi` lists every available resource type:
+The entry point at `/jsonapi` has an empty `data` array and lists every available resource type under `links`, keyed by resource type name. For authenticated requests it also adds `meta.links.me`, which points to the current user's resource:
 
 ```json
 {
@@ -17,19 +17,24 @@ The discovery document at `/jsonapi` lists every available resource type:
     "version": "1.1",
     "meta": {
       "links": {
-        "self": { "href": "http://example.com/jsonapi" }
+        "self": { "href": "http://jsonapi.org/format/1.1/" }
       }
     }
   },
-  "data": [
-    {
-      "type": "resource_types--resource_type",
-      "id": "node--article",
-      "attributes": {
-        "description": "Article content type"
+  "data": [],
+  "meta": {
+    "links": {
+      "me": {
+        "meta": { "id": "current-user-uuid" },
+        "href": "https://my-site.ddev.site/jsonapi/user/user/current-user-uuid"
       }
     }
-  ]
+  },
+  "links": {
+    "node--article": { "href": "https://my-site.ddev.site/jsonapi/node/article" },
+    "taxonomy_term--tags": { "href": "https://my-site.ddev.site/jsonapi/taxonomy_term/tags" },
+    "self": { "href": "https://my-site.ddev.site/jsonapi" }
+  }
 }
 ```
 
@@ -124,14 +129,18 @@ curl -s -G \
   --data-urlencode 'filter[title-filter][condition][value]=Drupal' \
   https://my-site.ddev.site/jsonapi/node/article
 
-# Created after a date
+# Created after a date (created/changed are timestamp fields: filter with a
+# Unix timestamp — 1767225600 is 2026-01-01T00:00:00Z)
 curl -s -G \
   -H "Accept: application/vnd.api+json" \
   --data-urlencode 'filter[recent][condition][path]=created' \
   --data-urlencode 'filter[recent][condition][operator]=>' \
-  --data-urlencode 'filter[recent][condition][value]=2026-01-01T00:00:00' \
+  --data-urlencode 'filter[recent][condition][value]=1767225600' \
   https://my-site.ddev.site/jsonapi/node/article
 ```
+
+!!! note "Timestamp vs date fields"
+    Timestamp fields such as `created` and `changed` must be filtered with a Unix timestamp. ISO 8601 strings only work for Date (`datetime`) fields.
 
 ### Filter groups (AND / OR)
 
@@ -277,6 +286,15 @@ async function fetchAllArticles(baseUrl: string): Promise<unknown[]> {
 
 ## POST — create resources
 
+!!! warning "JSON:API is read-only by default"
+    Core ships `jsonapi.settings:read_only: true`, so every POST, PATCH and DELETE below returns `405 Method Not Allowed` until you allow writes (see [Read-only mode](#read-only-mode)):
+
+    ```bash
+    drush config:set jsonapi.settings read_only false -y
+    ```
+
+    The `-u admin:admin` examples also need the core `basic_auth` module enabled (local development only).
+
 ```bash
 curl -s -X POST \
   -u admin:admin \
@@ -306,8 +324,8 @@ curl -s -X POST \
 
 Required permissions:
 
-- `restful post node--article` (or entity-specific create permission)
-- Authenticated user with `create article content`
+- JSON:API has no permissions of its own (the `restful *` permissions belong to the REST module and are not used here)
+- The authenticated user needs the normal entity permission, e.g. `create article content`
 
 ## PATCH — update resources
 
@@ -344,18 +362,24 @@ Returns `204 No Content` on success.
 
 ## Read-only mode
 
-Lock down mutations in production:
+Read-only mode is the **default** in core: only GET requests are accepted. Keep it on for read-only frontends, and turn it off only on sites that need mutations through JSON:API:
 
 ```yaml
 # config/sync/jsonapi.settings.yml
-read_only: true
+read_only: true   # default; set to false to accept POST, PATCH and DELETE
 ```
 
 Or via Drush:
 
 ```bash
+# Allow writes
+drush config:set jsonapi.settings read_only false -y
+
+# Lock down again
 drush config:set jsonapi.settings read_only true -y
 ```
+
+With writes enabled, entity access still applies: each request needs a user with the matching create/edit/delete permission.
 
 ## JSON:API Extras (contrib)
 
@@ -418,13 +442,15 @@ export async function getArticles(): Promise<JsonApiResource[]> {
 
 ## Permissions checklist
 
+JSON:API defines no permissions; it applies normal entity access to every request. For article nodes:
+
 | Action | Permission |
 |--------|------------|
-| Read collection | `access jsonapi resource` + entity view |
-| Read individual | Entity view permission |
-| Create | Entity create + `restful post` |
-| Update | Entity edit + `restful patch` |
-| Delete | Entity delete + `restful delete` |
+| Read collection | Entity view access (`access content` for published nodes); items the user cannot view are omitted |
+| Read individual | Entity view access (`access content`; `view own unpublished content` etc. for drafts) |
+| Create | `create article content` (and `read_only: false`) |
+| Update | `edit own article content` or `edit any article content` (and `read_only: false`) |
+| Delete | `delete own article content` or `delete any article content` (and `read_only: false`) |
 
 ## Related pages
 

@@ -31,7 +31,6 @@ mkdir my-drupal-site && cd my-drupal-site
 ddev config \
   --project-type=drupal11 \
   --docroot=web \
-  --create-docroot \
   --php-version=8.3
 
 # Start containers
@@ -40,15 +39,16 @@ ddev start
 # Create Drupal project via Composer
 ddev composer create "drupal/recommended-project:^11" --no-install
 ddev composer install
+
+# Add Drush (not included in recommended-project)
+ddev composer require drush/drush
 ```
 
 ## Step 3: Install Drupal
 
 ```bash
-# Copy default settings
-cp web/sites/default/default.settings.php web/sites/default/settings.php
-cp web/sites/default/default.services.yml web/sites/default/services.yml
-chmod 666 web/sites/default/settings.php
+# DDEV generates settings.php and settings.ddev.php (database credentials)
+# for you; don't overwrite settings.php with default.settings.php.
 
 # Install via Drush
 ddev drush site:install standard \
@@ -99,11 +99,11 @@ ddev drush cr
 ```bash
 composer create-project drupal/recommended-project my-site
 cd my-site
+composer require drush/drush
 
-# Configure database in web/sites/default/settings.php
-# Then install:
-cd web
-../vendor/bin/drush site:install standard -y
+# Install; Drush creates settings.php and writes the database settings
+vendor/bin/drush site:install standard \
+  --db-url=mysql://drupal:drupal@127.0.0.1:3306/drupal -y
 ```
 
 ### Database settings example

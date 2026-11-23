@@ -40,7 +40,7 @@ $build = [
 ];
 ```
 
-Without explicit keys, Drupal auto-generates keys from the render array structure.
+Without `#cache['keys']`, the element is **not** render-cached at all. Its tags, contexts and max-age still bubble up to the parent, which is cached only if it has keys of its own.
 
 ## Attaching cache to render arrays
 
@@ -53,18 +53,19 @@ declare(strict_types=1);
 
 namespace Drupal\my_module\Plugin\Block;
 
+use Drupal\Core\Block\Attribute\Block;
 use Drupal\Core\Block\BlockBase;
 use Drupal\Core\Cache\Cache;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\node\NodeInterface;
 
 /**
  * Recent articles block with proper render cache.
- *
- * @Block(
- *   id = "recent_articles",
- *   admin_label = @Translation("Recent articles"),
- * )
  */
+#[Block(
+  id: 'recent_articles',
+  admin_label: new TranslatableMarkup('Recent articles'),
+)]
 final class RecentArticlesBlock extends BlockBase {
 
   /**
@@ -157,7 +158,6 @@ $build = [
   ],
   '#cache' => [
     'keys' => ['my_page'],
-    'contexts' => ['user'],
     'tags' => ['node_list'],
     'max-age' => Cache::PERMANENT,
   ],
@@ -165,7 +165,12 @@ $build = [
 ```
 
 ```php
-// my_module.lazy_builder service
+// my_module.lazy_builder service — the class must implement
+// \Drupal\Core\Security\TrustedCallbackInterface.
+public static function trustedCallbacks(): array {
+  return ['greeting'];
+}
+
 public function greeting(): array {
   $name = $this->currentUser->getDisplayName();
   return [
@@ -177,7 +182,7 @@ public function greeting(): array {
 }
 ```
 
-The outer page caches permanently; the greeting placeholder renders per-user at request time.
+The outer page caches permanently and is shared by all users, because the `user` context lives only on the placeholder. The greeting renders per user at request time. If the lazy builder's class does not implement `TrustedCallbackInterface`, the renderer throws `UntrustedCallbackException`.
 
 ## Entity view builder cache
 
@@ -190,7 +195,7 @@ $build = \Drupal::entityTypeManager()
 // Automatically includes node:{nid} cache tags
 ```
 
-Disable per entity type in `entity_view_display` config or:
+To disable it for a whole entity type, set `render_cache: FALSE` in the entity type's `#[ContentEntityType]` attribute. For a single build:
 
 ```php
 $build['#cache']['max-age'] = 0;
@@ -224,10 +229,15 @@ $settings['cache']['bins']['render'] = 'cache.backend.null';
 $build['#cache']['max-age'] = 0;
 ```
 
+```yaml
+# sites/development.services.yml — adds X-Drupal-Cache-Tags,
+# X-Drupal-Cache-Contexts and X-Drupal-Cache-Max-Age response headers
+parameters:
+  http.response.debug_cacheability_headers: true
+```
+
 ```bash
-# Add cache debug headers (devel)
-drush en devel -y
-# Visit page with ?debug_cache=1 (with devel settings)
+curl -sI https://my-site.ddev.site/node/1 | grep -i x-drupal-cache
 ```
 
 ## Common mistakes

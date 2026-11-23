@@ -155,15 +155,18 @@ use Drupal\Core\Session\AccountInterface;
 final class TaskAccessControlHandler extends EntityAccessControlHandler {
 
   protected function checkAccess(EntityInterface $entity, $operation, AccountInterface $account): AccessResult {
+    /** @var \Drupal\example_module\TaskInterface $entity */
     if ($operation === 'view') {
       return AccessResult::allowedIfHasPermission($account, 'view example tasks')
         ->cachePerPermissions();
     }
 
     if ($operation === 'update') {
+      // getOwnerId() requires EntityOwnerInterface on the entity.
       return AccessResult::allowedIfHasPermission($account, 'edit example tasks')
-        ->orIf(AccessResult::allowedIf($entity->getOwnerId() === (int) $account->id()))
+        ->orIf(AccessResult::allowedIf((int) $entity->getOwnerId() === (int) $account->id()))
         ->cachePerPermissions()
+        ->cachePerUser()
         ->addCacheableDependency($entity);
     }
 
@@ -243,7 +246,7 @@ AccessResult::forbiddenIf($condition);
 
 // Combine.
 AccessResult::allowedIfHasPermission($account, 'edit example tasks')
-  ->orIf(AccessResult::allowedIf($node->getOwnerId() === $account->id()));
+  ->orIf(AccessResult::allowedIf((int) $node->getOwnerId() === (int) $account->id())->cachePerUser());
 
 // Cache metadata (required for performance).
 AccessResult::allowed()
@@ -272,7 +275,7 @@ ddev drush php:eval "
     `AccessResult` without cache contexts causes incorrect access for other users. Use `cachePerPermissions()`, `cachePerUser()`, or `addCacheableDependency()`.
 
 !!! note "accessCheck on queries"
-    Entity queries with `accessCheck(TRUE)` respect entity access handlers. SQL queries need `->addTag('node_access')` or equivalent.
+    `accessCheck(TRUE)` on an entity query does **not** call the entity access handler (`checkAccess()`). It only adds the `{entity_type}_access` query tag, which applies query-level access such as node grants. Check `$entity->access('view')` on loaded entities when per-entity rules matter. Database API queries need `->addTag('node_access')` or equivalent.
 
 !!! tip "Security review"
     Restrict `administer *` permissions with `restrict access: true` so only trusted roles receive them.

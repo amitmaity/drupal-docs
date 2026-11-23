@@ -50,17 +50,17 @@ $build['#cache']['contexts'] = [
 
 ## Context optimization
 
-Use the **most specific** context to maximize cache hits:
+Use the **least granular** context that still describes how the output varies, to maximize cache hits:
 
 ```php
-// Too broad — separate cache entry per user
+// Most granular — separate cache entry per user (avoid where possible)
 $build['#cache']['contexts'] = ['user'];
 
-// Better — shared across all users with same roles
-$build['#cache']['contexts'] = ['user.roles:authenticated'];
-
-// Best — only if output truly depends on a specific permission
+// Per permission set — users whose roles grant the same permissions share an entry
 $build['#cache']['contexts'] = ['user.permissions'];
+
+// Coarsest — only two variations: has the authenticated role or not
+$build['#cache']['contexts'] = ['user.roles:authenticated'];
 ```
 
 ```mermaid
@@ -109,19 +109,57 @@ $build = [
 ```
 
 ```php
-public function greeting(): array {
-  return [
-    '#markup' => 'Hello, ' . $this->currentUser->getDisplayName(),
-    '#cache' => ['contexts' => ['user']],
-  ];
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\my_module;
+
+use Drupal\Core\Security\TrustedCallbackInterface;
+use Drupal\Core\Session\AccountProxyInterface;
+
+/**
+ * Lazy builders for my_module (service: my_module.lazy).
+ */
+final class LazyBuilders implements TrustedCallbackInterface {
+
+  public function __construct(
+    private readonly AccountProxyInterface $currentUser,
+  ) {}
+
+  public static function trustedCallbacks(): array {
+    return ['greeting'];
+  }
+
+  public function greeting(): array {
+    return [
+      '#markup' => 'Hello, ' . $this->currentUser->getDisplayName(),
+      '#cache' => ['contexts' => ['user']],
+    ];
+  }
+
 }
 ```
 
+```yaml
+# my_module.services.yml
+services:
+  my_module.lazy:
+    class: Drupal\my_module\LazyBuilders
+    arguments: ['@current_user']
+```
+
+!!! note "Lazy builders must be trusted callbacks"
+    The class behind a `#lazy_builder` callback must implement `TrustedCallbackInterface` and list the method in `trustedCallbacks()`. Otherwise the renderer throws `UntrustedCallbackException`.
+
 ## Custom cache contexts
 
-Create a context for application-specific variation:
+Create a context for application-specific variation. Cache contexts are not plugins: each one is a service whose ID starts with `cache_context.` and that is tagged `cache.context`.
 
-### MyAppContext.php
+!!! tip "Varying by a single request header"
+    For a plain header value, core's `headers` context already does this: `$build['#cache']['contexts'] = ['headers:X-Tenant-ID'];`. Write a custom context only when you need extra logic, such as normalizing or validating the value.
+
+### TenantCacheContext.php
 
 ```php
 <?php
@@ -137,7 +175,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
 /**
  * Cache context based on a custom request header.
  *
- * @CacheContext("my_app.tenant")
+ * Cache context ID: my_app.tenant (service: cache_context.my_app.tenant).
  */
 final class TenantCacheContext implements CacheContextInterface {
 
@@ -149,7 +187,7 @@ final class TenantCacheContext implements CacheContextInterface {
    * {@inheritdoc}
    */
   public static function getLabel(): string {
-    return t('Tenant');
+    return (string) t('Tenant');
   }
 
   /**
@@ -168,6 +206,16 @@ final class TenantCacheContext implements CacheContextInterface {
   }
 
 }
+```
+
+```yaml
+# my_module.services.yml
+services:
+  cache_context.my_app.tenant:
+    class: Drupal\my_module\Cache\Context\TenantCacheContext
+    arguments: ['@request_stack']
+    tags:
+      - { name: cache.context }
 ```
 
 ```php

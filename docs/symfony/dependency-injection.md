@@ -1,6 +1,6 @@
 # Dependency Injection
 
-Symfony's **DependencyInjection** component compiles service definitions into a fast, lazy-loaded container. Drupal extends this with `DrupalContainerBuilder`, YAML discovery across modules, and tagged service collectors.
+Symfony's **DependencyInjection** component compiles service definitions into a fast, lazy-loaded container. Drupal extends this with its own `Drupal\Core\DependencyInjection\ContainerBuilder`, YAML discovery across modules, and tagged service collectors.
 
 !!! tip "Full DI guide"
     For in-depth Drupal DI patterns — constructor injection, decoration, tagged services — see the dedicated **[Dependency Injection section](../dependency-injection/index.md)**.
@@ -9,7 +9,7 @@ Symfony's **DependencyInjection** component compiles service definitions into a 
 
 | Symfony | Drupal |
 |---------|--------|
-| `ContainerBuilder` | `DrupalContainerBuilder` |
+| `ContainerBuilder` | `Drupal\Core\DependencyInjection\ContainerBuilder` (extends Symfony's) |
 | `services.yaml` | `*.services.yml` per module |
 | `services.xml` | Rare in Drupal; YAML preferred |
 | Autowiring | Partial; explicit arguments common |
@@ -18,7 +18,7 @@ Symfony's **DependencyInjection** component compiles service definitions into a 
 ```mermaid
 flowchart TD
     YAML["*.services.yml files"] --> Compiler[Container compile]
-    Compiler --> PHP["sites/default/files/php/container.php"]
+    Compiler --> PHP["Serialized definition in cache_container table"]
     PHP --> Container[Drupal container]
     Container --> Services[Your services]
 ```
@@ -42,8 +42,6 @@ services:
       - '@my_module.product_repository'
       - '@http_client'
       - '@logger.channel.my_module'
-    calls:
-      - [setMessenger, ['@messenger']]
 
   logger.channel.my_module:
     parent: logger.channel_base
@@ -134,7 +132,7 @@ services:
 | Autoconfigure | Default on | Opt-in via tags |
 | Service IDs | Class FQCN common | Short IDs (`entity_type.manager`) |
 | Parameters | `%kernel.project_dir%` | `%app.root%`, `%site.path%` |
-| Container cache | `var/cache` | `sites/default/files/php/` |
+| Container cache | `var/cache` | `cache.container` bin (`cache_container` table) |
 | Public by default | No (Symfony 4+) | Most services public |
 
 !!! note "Avoid \Drupal:: static calls in new code"
@@ -178,11 +176,9 @@ See [Service Decoration](../dependency-injection/service-decoration.md).
         class: Drupal\my_module\Export\ExportManager
         arguments: [!tagged_iterator { tag: my_module.export_handler, index_by: format }]
 
-      my_module.export_controller:
-        class: Drupal\my_module\Controller\ExportController
-        arguments: ['@my_module.export_manager']
-        tags:
-          - { name: controller.service_arguments }
+      # Lets ControllerBase autowire ExportManager into ExportController;
+      # no controller service definition is needed.
+      Drupal\my_module\Export\ExportManager: '@my_module.export_manager'
     ```
 
 === "ExportManager"
@@ -197,11 +193,18 @@ See [Service Decoration](../dependency-injection/service-decoration.md).
     final class ExportManager {
 
       /**
+       * @var array<string, ExportHandlerInterface>
+       */
+      private readonly array $handlers;
+
+      /**
        * @param iterable<string, ExportHandlerInterface> $handlers
        */
-      public function __construct(
-        private readonly iterable $handlers,
-      ) {}
+      public function __construct(iterable $handlers) {
+        // !tagged_iterator injects a lazy RewindableGenerator, which does not
+        // support isset() or [] access. Materialize it, keeping the format keys.
+        $this->handlers = iterator_to_array($handlers);
+      }
 
       public function export(string $format, array $products): string {
         if (!isset($this->handlers[$format])) {

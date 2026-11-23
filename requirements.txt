@@ -1,3 +1,5 @@
-mkdocs>=1.6.0
-mkdocs-material>=9.5.0
-pymdown-extensions>=10.8
+# Upper bounds are deliberate: MkDocs 2.0 drops the plugin/theme system that
+# Material for MkDocs depends on, so an unpinned install would break CI.
+mkdocs>=1.6.1,<2
+mkdocs-material>=9.7,<10
+pymdown-extensions>=10.8,<11

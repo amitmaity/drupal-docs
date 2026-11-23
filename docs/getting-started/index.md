@@ -30,5 +30,6 @@ composer require drush/drush
 
 # PHP CodeSniffer for standards
 composer require --dev drupal/coder
-vendor/bin/phpcs --config-set installed_paths vendor/drupal/coder/coder_sniffer
+# Standards are registered automatically; confirm Drupal and DrupalPractice are listed
+vendor/bin/phpcs -i
 ```

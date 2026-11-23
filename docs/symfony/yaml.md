@@ -25,7 +25,7 @@ $yaml = Yaml::dump($data, 2, 2, Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK);
 
 ### Config export/import
 
-Drupal stores active configuration as YAML in the database and exports to `config/sync/*.yml`:
+Drupal stores active configuration as serialized PHP arrays in the `config` database table, and exports it as YAML to `config/sync/*.yml`:
 
 ```yaml
 # config/sync/system.site.yml
@@ -47,7 +47,7 @@ mail_notification: null
 
 ### Routing and services
 
-Every module ships `*.routing.yml` and `*.services.yml` — compiled into PHP cache on container build.
+Modules ship `*.routing.yml` and `*.services.yml`. Routes are rebuilt into the `router` database table, and services are compiled into the container definition cached in `cache_container`.
 
 ### Module info
 

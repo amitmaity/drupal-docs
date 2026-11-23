@@ -108,6 +108,9 @@ final class GreetingController extends ControllerBase {
 
 ## Preprocess hook — `src/Hook/PreprocessHooks.php`
 
+!!! note "Drupal 11.2+"
+    Modules can implement preprocess hooks as OOP `#[Hook('preprocess_HOOK')]` methods from Drupal 11.2. On older versions, use procedural `example_module_preprocess_HOOK()` functions in `example_module.module` (see [OOP & Legacy Hooks](hooks.md)). Themes keep procedural preprocess functions.
+
 ```php
 <?php
 
@@ -204,13 +207,33 @@ Create `templates/example-module-greeting--named.html.twig` for the suggestion-s
 
 ## Override core templates from a module
 
-Place templates in `templates/` with the same name as the theme hook:
+Only themes pick up template overrides just by file name. A module must register the template suggestion as a theme hook with a `base hook`, then ship the template in its `templates/` directory:
+
+```php
+  /**
+   * Implements hook_theme().
+   */
+  #[Hook('theme')]
+  public function theme(): array {
+    return [
+      // ...hooks from the ThemeHooks example above...
+      'block__example_module_greeting_block' => [
+        'base hook' => 'block',
+      ],
+      'node__article__teaser' => [
+        'base hook' => 'node',
+      ],
+    ];
+  }
+```
 
 ```
 templates/
 ├── block--example-module-greeting-block.html.twig
 └── node--article--teaser.html.twig
 ```
+
+The active theme can still override these templates. To replace a core template outright (not only a suggestion), alter its `path` in `hook_theme_registry_alter()`.
 
 ```twig
 {# templates/block--example-module-greeting-block.html.twig #}

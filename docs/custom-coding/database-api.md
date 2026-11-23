@@ -195,12 +195,14 @@ final class LogRepository {
   }
 
   public function countBySeverity(): array {
-    return $this->database->select('example_module_log', 'l')
-      ->fields('l', ['severity'])
-      ->addExpression('COUNT(*)', 'total')
-      ->groupBy('severity')
-      ->execute()
-      ->fetchAllKeyed();
+    $query = $this->database->select('example_module_log', 'l')
+      ->fields('l', ['severity']);
+    // addExpression() returns the alias, not the query, so it cannot be
+    // chained.
+    $query->addExpression('COUNT(*)', 'total');
+    $query->groupBy('l.severity');
+
+    return $query->execute()->fetchAllKeyed();
   }
 
 }
@@ -263,7 +265,7 @@ $count = \Drupal::entityQuery('node')
   ->count()
   ->execute();
 
-// Aggregate (Drupal 10.2+).
+// Aggregate.
 $result = \Drupal::entityQueryAggregate('node')
   ->accessCheck(TRUE)
   ->condition('status', 1)
@@ -324,10 +326,10 @@ $nids = $query->execute()->fetchAllKeyed(0, 1);
 ```
 
 !!! warning "Always set accessCheck"
-    Entity queries default changed in Drupal 9.2+. Explicitly pass `->accessCheck(TRUE)` or `FALSE` — omitting it triggers a deprecation.
+    Explicitly call `->accessCheck(TRUE)` or `->accessCheck(FALSE)` on every entity query. Since Drupal 10, omitting it throws a `QueryException` when the query executes.
 
 !!! note "Never concatenate user input"
-    Use placeholders via `->condition()` and `->args()`. Raw SQL with variables is a SQL injection risk.
+    Pass values through `->condition()` on query builders, or use named placeholders in static queries: `$database->query('SELECT message FROM {example_module_log} WHERE id = :id', [':id' => $id])`. Raw SQL with variables is a SQL injection risk.
 
 !!! tip "Query logging"
-    Enable `database.logging: true` in `development.services.yml` and inspect queries with `drush watchdog:show --filter=Database`.
+    Wrap code with `Database::startLog('example')` and read the executed queries with `Database::getLog('example')` (`Drupal\Core\Database\Database`), or use the contrib Devel / WebProfiler modules during development.

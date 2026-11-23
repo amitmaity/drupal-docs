@@ -123,7 +123,6 @@ namespace Drupal\example_module\Form;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
-use Drupal\Core\Url;
 use Drupal\example_module\Service\BatchImporter;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -185,9 +184,9 @@ final class ImportBatchForm extends FormBase {
       ->condition('type', 'article')
       ->execute();
 
+    // Form API runs batches set during submission automatically. Any redirect
+    // set on $form_state is where the user lands after the batch finishes.
     $this->batchImporter->startImport(array_values($nids));
-
-    $form_state->setRedirectUrl(Url::fromRoute('system.batch_page.html'));
   }
 
 }
@@ -242,7 +241,10 @@ final class ImportController extends ControllerBase {
 
     $this->batchImporter->startImport(array_values($nids));
 
-    return new RedirectResponse(Url::fromRoute('system.batch_page.html')->toString());
+    // Outside Form API, batch_process() must be called to start the batch.
+    // It returns a redirect to the progress page; the argument is where the
+    // user goes when the batch finishes.
+    return batch_process(Url::fromRoute('example_module.import_batch'));
   }
 
 }

@@ -67,7 +67,7 @@ curl -s \
 ```
 
 !!! note "Permissions"
-    By default, anonymous users cannot read content via JSON:API. Grant **Access GET on JSON:API resources** and entity-specific view permissions, or authenticate requests. See [Authentication](auth/index.md).
+    JSON:API has no permissions of its own: every request goes through normal entity access. In the Standard profile anonymous users already have **View published content** (`access content`), so published nodes are readable without authentication; unpublished content, user emails and other restricted data require an authenticated request with the matching permissions. See [Authentication](auth/index.md).
 
 ## CORS for browser clients
 

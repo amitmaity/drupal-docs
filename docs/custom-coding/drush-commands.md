@@ -1,52 +1,44 @@
 # Drush Commands
 
-Custom Drush commands extend Drush's CLI using PHP 8 attributes. Commands live in `src/Commands/` and are registered via `drush.services.yml`.
+Custom Drush commands extend Drush's CLI using PHP 8 attributes. Drush 12+ discovers command classes automatically in `src/Drush/Commands/` (namespace `Drupal\<module>\Drush\Commands`, class names ending in `Commands`) — no service registration needed.
 
 ## File structure
 
 ```
 example_module/
-├── drush.services.yml
-└── src/Commands/
+└── src/Drush/Commands/
     └── ExampleCommands.php
 ```
 
----
-
-## `drush.services.yml`
-
-```yaml
-services:
-  example_module.commands:
-    class: Drupal\example_module\Commands\ExampleCommands
-    arguments:
-      - '@entity_type.manager'
-      - '@example_module.greeting_generator'
-    tags:
-      - { name: drush.command }
-```
+!!! note "`drush.services.yml` is deprecated"
+    Drush 11 and earlier registered commands as tagged services in `drush.services.yml`. That approach is deprecated since Drush 12; inject services with `AutowireTrait` (Drush 12.5+) or a static `create()` method instead.
 
 ---
 
-## Command class — `src/Commands/ExampleCommands.php`
+## Command class — `src/Drush/Commands/ExampleCommands.php`
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace Drupal\example_module\Commands;
+namespace Drupal\example_module\Drush\Commands;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\example_module\Service\GreetingGenerator;
 use Drush\Attributes as CLI;
+use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
-use Symfony\Component\Console\Input\InputOption;
 
 /**
  * Drush commands for example_module.
  */
 final class ExampleCommands extends DrushCommands {
+
+  // Resolves constructor arguments by type from the container. Custom
+  // services need a class alias in example_module.services.yml, e.g.
+  // Drupal\example_module\Service\GreetingGenerator: '@example_module.greeting_generator'
+  use AutowireTrait;
 
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -158,7 +150,8 @@ ddev drush example:purge-logs --days=7
 
 declare(strict_types=1);
 
-namespace Drupal\example_module\Commands;
+// src/Drush/Commands/ValidatedCommands.php — discovered automatically.
+namespace Drupal\example_module\Drush\Commands;
 
 use Drush\Attributes as CLI;
 use Drush\Commands\DrushCommands;
@@ -192,7 +185,7 @@ ddev drush cr
     Drush 12 uses PHP 8 `#[CLI\Command]` attributes. Legacy `@command` annotations are deprecated.
 
 !!! tip "Inject services"
-    List constructor dependencies in `drush.services.yml` arguments. Do not use `\Drupal::` inside commands except for quick prototypes.
+    Type-hint constructor dependencies and add `use AutowireTrait;` (or write a static `create(ContainerInterface $container)` method). Do not use `\Drupal::` inside commands except for quick prototypes.
 
 !!! warning "Batch and queue from Drush"
     Long operations should delegate to [Batch API](batch-api.md) or [Queue API](queue-api.md) rather than blocking the terminal.

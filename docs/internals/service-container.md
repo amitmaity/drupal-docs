@@ -7,7 +7,7 @@ Drupal's service container is the runtime registry for every object the applicat
 ```mermaid
 flowchart TD
     A[Module discovery] --> B[Load *.services.yml]
-    B --> C[DrupalContainerBuilder]
+    B --> C[ContainerBuilder]
     C --> D[Compiler passes]
     D --> E{Cache valid?}
     E -->|Yes| F[Load PHP cache file]
@@ -17,9 +17,9 @@ flowchart TD
     H --> I
 ```
 
-## DrupalContainerBuilder
+## ContainerBuilder
 
-Drupal extends Symfony's `ContainerBuilder` with CMS-specific compiler passes:
+Drupal extends Symfony's `ContainerBuilder` as `Drupal\Core\DependencyInjection\ContainerBuilder`:
 
 ```php
 <?php
@@ -31,29 +31,23 @@ namespace Drupal\Core\DependencyInjection;
 use Symfony\Component\DependencyInjection\ContainerBuilder as SymfonyContainerBuilder;
 
 /**
- * Drupal's container builder — merges module service definitions.
+ * Drupal's container builder (simplified).
  */
-class DrupalContainerBuilder extends SymfonyContainerBuilder {
-
-  public function __construct() {
-    parent::__construct();
-    // Drupal registers compiler passes for:
-    // - Tagged service collectors (event subscribers, access checkers)
-    // - Service provider discovery
-    // - Parameter bag merging
-  }
+class ContainerBuilder extends SymfonyContainerBuilder {
+  // Compiler passes are not added here: CoreServiceProvider::register()
+  // registers them, and each module's service provider may add more.
 }
 ```
 
-Key compiler passes registered during build:
+Key compiler passes registered in `CoreServiceProvider::register()`:
 
 | Pass | Purpose |
 |------|---------|
 | `RegisterEventSubscribersPass` | Wires `event_subscriber` tags to EventDispatcher |
-| `RegisterAccessCheckPass` | Collects `access_check` tagged services |
+| `RegisterAccessChecksPass` | Collects `access_check` tagged services |
 | `TaggedHandlersPass` | Generic tag → method call collector |
-| `ModifyServiceDefinitionsPass` | Drupal-specific service alterations |
-| `ProxyServicesPass` | Lazy-loading proxies for expensive services |
+| `ModifyServiceDefinitionsPass` | Runs service providers' `alter()` methods |
+| `ProxyServicesPass` | Swaps `lazy: true` services for generated proxy classes |
 
 ## How the kernel builds the container
 
@@ -73,7 +67,7 @@ protected function initializeContainer() {
     return $container_definition;
   }
 
-  $container = new DrupalContainerBuilder();
+  $container = new ContainerBuilder();
 
   // 1. Add core service providers.
   // 2. Add each enabled module's service provider / YAML.
@@ -86,7 +80,7 @@ protected function initializeContainer() {
 
 ## Service providers
 
-Modules can register services programmatically via `ServiceProviderInterface`:
+Modules can register services programmatically (`register()`) or alter existing definitions (`alter()`) with a service provider:
 
 ```php
 <?php
@@ -96,33 +90,24 @@ declare(strict_types=1);
 namespace Drupal\my_module;
 
 use Drupal\Core\DependencyInjection\ContainerBuilder;
-use Drupal\Core\DependencyInjection\ServiceProviderInterface;
+use Drupal\Core\DependencyInjection\ServiceProviderBase;
+use Symfony\Component\DependencyInjection\Reference;
 
-final class MyModuleServiceProvider implements ServiceProviderInterface {
+final class MyModuleServiceProvider extends ServiceProviderBase {
 
-  public function register(ContainerBuilder $container): void {
+  public function alter(ContainerBuilder $container): void {
     // Alter existing definitions at compile time.
-    if ($container->hasDefinition('logger.factory')) {
-      $definition = $container->getDefinition('logger.factory');
-      $definition->addMethodCall('addLogger', [
-        'my_module',
-        '@logger.channel.my_module',
-      ]);
+    if ($container->hasDefinition('language_manager')) {
+      $container->getDefinition('language_manager')
+        ->setClass('Drupal\my_module\MyLanguageManager')
+        ->addArgument(new Reference('entity_type.manager'));
     }
   }
 
 }
 ```
 
-Register the provider in `my_module.services.yml`:
-
-```yaml
-services:
-  my_module.service_provider:
-    class: Drupal\my_module\MyModuleServiceProvider
-    tags:
-      - { name: service_provider }
-```
+No registration is needed: Drupal discovers the provider by naming convention. The class must be `Drupal\{module}\{CamelCasedModule}ServiceProvider` — here `Drupal\my_module\MyModuleServiceProvider` in `src/MyModuleServiceProvider.php`. There is no `service_provider` tag.
 
 ## Cached container
 
@@ -133,8 +118,8 @@ After compilation, Drupal dumps a PHP class to the filesystem:
 drush cr
 find web/sites/default/files/php -name "*.php" -newer web/sites/default/settings.php 2>/dev/null | head -3
 
-# Inspect container hash (changes when services change)
-drush php:eval "echo \Drupal::getContainer()->getParameter('container.build_id');"
+# Count compiled services (changes when service definitions change)
+drush php:eval "echo count(\Drupal::getContainer()->getServiceIds());"
 ```
 
 The cached file is a generated class implementing `ContainerInterface` with inlined factory methods — no YAML parsing at runtime.
@@ -227,10 +212,11 @@ declare(strict_types=1);
 
 namespace Drupal\my_module\Service;
 
-final class HeavyProcessor {
+final class HeavyProcessor implements HeavyProcessorInterface {
 
   public function __construct() {
-    // Without lazy: true, this runs on every request even if never used.
+    // Without lazy: true, this runs whenever a service that depends on it is
+    // built — even if process() is never called.
     sleep(1); // Simulating expensive init
   }
 
@@ -241,6 +227,15 @@ final class HeavyProcessor {
 }
 ```
 
+!!! warning "Lazy services need a generated proxy class"
+    Drupal does not create lazy proxies on the fly. Generate one and commit it (it lands in `src/ProxyClass/`):
+
+    ```bash
+    php core/scripts/generate-proxy-class.php 'Drupal\my_module\Service\HeavyProcessor' 'modules/custom/my_module/src'
+    ```
+
+    Without it, the container build emits a "Missing proxy class" warning and the service is not lazy. The proxy implements the class's interfaces but does not extend it, so consumers must type-hint an interface (`HeavyProcessorInterface` above), not the class.
+
 ## Synthetic services
 
 Some services are set at runtime after container compilation:
@@ -250,9 +245,12 @@ Some services are set at runtime after container compilation:
 
 declare(strict_types=1);
 
-// DrupalKernel sets these after boot:
-// - 'request' — current Symfony Request
-// - 'current_user' — AccountProxy populated from session
+// DrupalKernel registers these as synthetic and sets them itself:
+// - 'kernel' — the DrupalKernel instance
+// - 'service_container' — the container
+// - 'class_loader' — the Composer class loader
+// There is no 'request' service (use 'request_stack'). 'current_user' and
+// 'current_route_match' are regular services defined in core.services.yml.
 ```
 
 ## Debugging the container
@@ -275,16 +273,17 @@ See [Debugging Services](debugging-services.md) for a full debugging guide.
 The container is recompiled when:
 
 1. `drush cr` (cache rebuild)
-2. A module is enabled or disabled
-3. `*.services.yml` changes are detected (via container build ID hash)
-4. Service provider alters change compiled output
+2. A module is installed or uninstalled
+3. The container cache key changes: Drupal version, `$settings['deployment_identifier']`, or the `$settings['container_yamls']` list
+
+Edits to `*.services.yml` or service providers are **not** detected automatically — they take effect only after `drush cr`.
 
 ```bash
 # Enable a module — triggers container rebuild
 drush en my_module -y
 
-# Development: disable container caching (settings.local.php)
-# $settings['container_yamls'][] = ...  — NOT recommended for production
+# After editing *.services.yml or a service provider
+drush cr
 ```
 
 !!! tip "Development workflow"

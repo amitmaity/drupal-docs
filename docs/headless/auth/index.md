@@ -74,10 +74,14 @@ fetch(`${DRUPAL_URL}/jsonapi/node/article`, {
 
 Authentication identifies **who** the user is. **Permissions** still gate access:
 
+JSON:API has no permissions of its own; it applies normal entity access. Grant the entity permissions the client needs:
+
 ```bash
-# Grant API consumer role JSON:API read access
-drush role:perm:add api_consumer 'access jsonapi resource'
-drush role:perm:add api_consumer 'view published content'
+# Read published content ("View published content")
+drush role:perm:add api_consumer 'access content'
+
+# Create and edit own articles (JSON:API must also have read_only: false)
+drush role:perm:add api_consumer 'create article content,edit own article content'
 ```
 
 ## Recommended production setup

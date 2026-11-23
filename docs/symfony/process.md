@@ -102,6 +102,7 @@ Not Process-related, but operational security when spawning shells — always va
 
     namespace Drupal\my_module\Service;
 
+    use Drupal\Core\File\FileExists;
     use Drupal\Core\File\FileSystemInterface;
     use Drupal\Core\Logger\LoggerChannelInterface;
     use Symfony\Component\Process\Exception\ProcessFailedException;
@@ -116,8 +117,11 @@ Not Process-related, but operational security when spawning shells — always va
       ) {}
 
       public function generateFromHtml(string $html, string $destinationUri): string {
-        $tempHtml = $this->fileSystem->tempnam('temporary://', 'pdf_') . '.html';
-        $tempPdf = $this->fileSystem->tempnam('temporary://', 'pdf_') . '.pdf';
+        // External binaries cannot read stream wrapper URIs such as
+        // temporary://, so pass real filesystem paths.
+        $base = $this->fileSystem->getTempDirectory() . '/' . uniqid('pdf_', TRUE);
+        $tempHtml = $base . '.html';
+        $tempPdf = $base . '.pdf';
 
         file_put_contents($tempHtml, $html);
 
@@ -142,7 +146,7 @@ Not Process-related, but operational security when spawning shells — always va
           @unlink($tempHtml);
         }
 
-        $this->fileSystem->move($tempPdf, $destinationUri, FileSystemInterface::EXISTS_REPLACE);
+        $this->fileSystem->move($tempPdf, $destinationUri, FileExists::Replace);
 
         return $destinationUri;
       }

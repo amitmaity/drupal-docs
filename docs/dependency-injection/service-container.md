@@ -73,8 +73,8 @@ After compilation, Drupal dumps an optimized PHP file. The generated class:
 # Trigger recompilation
 drush cr
 
-# Container build ID changes on every rebuild
-drush php:eval "echo \Drupal::getContainer()->getParameter('container.build_id');"
+# Count compiled services (changes when service definitions change)
+drush php:eval "echo count(\Drupal::getContainer()->getServiceIds());"
 ```
 
 ```php
@@ -133,7 +133,7 @@ services:
 | `calls` | `[]` | Method calls after construction |
 | `tags` | `[]` | Compiler pass collectors |
 | `public` | `true` | Accessible via `$container->get()` |
-| `lazy` | `false` | Proxy until first use |
+| `lazy` | `false` | Proxy until first use (needs a generated proxy class) |
 | `shared` | `true` | Singleton per request |
 | `decorates` | — | Wrap another service |
 
@@ -164,7 +164,8 @@ Reference syntax:
 | `@service.id` | Another service |
 | `%parameter.name%` | Container parameter |
 | `@?service.id` | Optional service (null if missing) |
-| `@=service('id').method()` | Expression (advanced) |
+
+Symfony's expression syntax (`@=service('id').method()`) is not supported: Drupal's YAML loader throws an exception for it.
 
 ## Autowiring (Drupal 11)
 
@@ -219,12 +220,13 @@ Some services are set after compilation:
 
 declare(strict_types=1);
 
-// Set by DrupalKernel after boot:
-// 'request' — current Request object
-// 'current_route_match' — matched route for this request
+// Registered as synthetic and set by DrupalKernel itself:
+// 'kernel' — the DrupalKernel instance
+// 'service_container' — the container
+// 'class_loader' — the Composer class loader
 ```
 
-Do not define these in your module's `services.yml`.
+Do not define these in your module's `services.yml`. There is no `request` service — inject `request_stack`. `current_user` and `current_route_match` are ordinary services defined in `core.services.yml`.
 
 ## Container debugging
 
@@ -245,9 +247,9 @@ drush php:eval "print_r(\Drupal::getContainer()->getParameter('my_module.api_bas
 |--------|-------------------|
 | `drush cr` | Yes |
 | Enable/disable module | Yes |
-| Edit `*.services.yml` | Yes (on next request) |
+| Edit `*.services.yml` | Only after `drush cr` (not detected automatically) |
 | Edit PHP service class only | No (opcache may need refresh) |
-| Edit service provider | Yes |
+| Edit service provider | Only after `drush cr` |
 
 ```bash
 # After any services.yml change

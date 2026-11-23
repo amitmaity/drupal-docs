@@ -71,6 +71,9 @@ $build['#cache']['max-age'] = 0;
 !!! tip "Prefer tags over short max-age"
     `max-age: 60` on content that changes rarely wastes CPU regenerating cache every minute. Use `Cache::PERMANENT` with proper cache tags instead.
 
+!!! warning "Internal Page Cache ignores max-age"
+    For anonymous requests, the Internal Page Cache (`page_cache` module) stores whole responses per URL. It ignores the bubbled `max-age` and cache contexts; entries expire only through cache tag invalidation, or through an `Expires` response header. A TTL-only render element, such as a block with `max-age: 300` or external API data with no tags, therefore stays stale for anonymous visitors until a tag is invalidated or caches are cleared. For time-sensitive anonymous output, attach a cache tag that you invalidate (for example from cron), set an `Expires` header, or call `\Drupal::service('page_cache_kill_switch')->trigger()` to skip the page cache for that response.
+
 ## Tag-based invalidation patterns
 
 ### Entity CRUD (automatic)

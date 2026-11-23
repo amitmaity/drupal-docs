@@ -51,6 +51,9 @@ modules/custom/headless_revalidate/
 │       └── headless_revalidate.schema.yml
 ├── headless_revalidate.module
 └── src/
+    ├── Plugin/
+    │   └── QueueWorker/
+    │       └── RevalidateQueueWorker.php
     └── Service/
         └── RevalidateClient.php
 ```
@@ -60,13 +63,24 @@ modules/custom/headless_revalidate/
 ```yaml
 frontend_url: 'https://my-frontend.vercel.app'
 revalidate_endpoint: '/api/revalidate'
-secret: 'CHANGE-ME-random-secret'
+# Never store the real secret here: this file is exported to config/sync
+# (and usually committed). Override it in settings.php instead.
+secret: ''
 enabled_bundles:
   - article
   - page
 ```
 
+Provide the secret at runtime with a config override. Overrides are not exported by `drush config:export`:
+
+```php
+// web/sites/default/settings.php
+$config['headless_revalidate.settings']['secret'] = getenv('HEADLESS_REVALIDATE_SECRET');
+```
+
 ### RevalidateClient.php
+
+The client builds the payload while the entity still exists, then sends it later from the queue. Building it up front is what makes deletions work: by the time the queue runs, a deleted entity can no longer be loaded.
 
 ```php
 <?php
@@ -92,18 +106,14 @@ final class RevalidateClient {
   ) {}
 
   /**
-   * Revalidates frontend cache for an entity.
+   * Builds the revalidation payload for an entity, or NULL to skip it.
    */
-  public function revalidateEntity(EntityInterface $entity): void {
+  public function buildPayload(EntityInterface $entity): ?array {
     $config = $this->configFactory->get('headless_revalidate.settings');
 
     if (!in_array($entity->bundle(), $config->get('enabled_bundles') ?? [], TRUE)) {
-      return;
+      return NULL;
     }
-
-    $frontendUrl = rtrim($config->get('frontend_url'), '/');
-    $endpoint = $config->get('revalidate_endpoint');
-    $secret = $config->get('secret');
 
     $tags = $entity->getCacheTags();
     $tags[] = 'node_list:' . $entity->bundle();
@@ -116,26 +126,38 @@ final class RevalidateClient {
       }
     }
 
+    return [
+      'tags' => $tags,
+      'paths' => $paths,
+      'entity_type' => $entity->getEntityTypeId(),
+      'bundle' => $entity->bundle(),
+      'id' => $entity->id(),
+    ];
+  }
+
+  /**
+   * Posts a payload built by buildPayload() to the frontend.
+   */
+  public function send(array $payload): void {
+    $config = $this->configFactory->get('headless_revalidate.settings');
+    $frontendUrl = rtrim($config->get('frontend_url'), '/');
+    $endpoint = $config->get('revalidate_endpoint');
+    $secret = $config->get('secret');
+
     try {
       $this->httpClient->post("{$frontendUrl}{$endpoint}", [
         'headers' => [
           'Content-Type' => 'application/json',
           'X-Revalidate-Secret' => $secret,
         ],
-        'json' => [
-          'tags' => $tags,
-          'paths' => $paths,
-          'entity_type' => $entity->getEntityTypeId(),
-          'bundle' => $entity->bundle(),
-          'id' => $entity->id(),
-        ],
+        'json' => $payload,
         'timeout' => 5,
       ]);
 
       $this->logger->info('Revalidated frontend for @type:@id tags=@tags', [
-        '@type' => $entity->getEntityTypeId(),
-        '@id' => $entity->id(),
-        '@tags' => implode(',', $tags),
+        '@type' => $payload['entity_type'],
+        '@id' => $payload['id'],
+        '@tags' => implode(',', $payload['tags']),
       ]);
     }
     catch (\Exception $e) {
@@ -172,9 +194,11 @@ function headless_revalidate_entity_update(EntityInterface $entity): void {
 }
 
 /**
- * Implements hook_entity_delete().
+ * Implements hook_entity_predelete().
+ *
+ * Runs before deletion, while the entity and its path alias still exist.
  */
-function headless_revalidate_entity_delete(EntityInterface $entity): void {
+function headless_revalidate_entity_predelete(EntityInterface $entity): void {
   _headless_revalidate_queue_entity($entity);
 }
 
@@ -186,12 +210,14 @@ function _headless_revalidate_queue_entity(EntityInterface $entity): void {
     return;
   }
 
-  // Queue for async processing to avoid blocking editor saves.
-  $queue = \Drupal::queue('headless_revalidate');
-  $queue->createItem([
-    'entity_type' => $entity->getEntityTypeId(),
-    'entity_id' => $entity->id(),
-  ]);
+  $payload = \Drupal::service('headless_revalidate.client')->buildPayload($entity);
+  if ($payload === NULL) {
+    return;
+  }
+
+  // Queue the complete payload (not just the ID) for async processing, so
+  // editor saves aren't blocked and deleted entities are still revalidated.
+  \Drupal::queue('headless_revalidate')->createItem($payload);
 }
 ```
 
@@ -204,7 +230,6 @@ declare(strict_types=1);
 
 namespace Drupal\headless_revalidate\Plugin\QueueWorker;
 
-use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\Queue\Attribute\QueueWorker;
 use Drupal\Core\Queue\QueueWorkerBase;
@@ -226,7 +251,6 @@ final class RevalidateQueueWorker extends QueueWorkerBase implements ContainerFa
     array $configuration,
     $plugin_id,
     $plugin_definition,
-    private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly RevalidateClient $revalidateClient,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
@@ -240,7 +264,6 @@ final class RevalidateQueueWorker extends QueueWorkerBase implements ContainerFa
       $configuration,
       $plugin_id,
       $plugin_definition,
-      $container->get('entity_type.manager'),
       $container->get('headless_revalidate.client'),
     );
   }
@@ -249,13 +272,8 @@ final class RevalidateQueueWorker extends QueueWorkerBase implements ContainerFa
    * {@inheritdoc}
    */
   public function processItem($data): void {
-    $entity = $this->entityTypeManager
-      ->getStorage($data['entity_type'])
-      ->load($data['entity_id']);
-
-    if ($entity) {
-      $this->revalidateClient->revalidateEntity($entity);
-    }
+    // $data is the payload built when the entity was saved or deleted.
+    $this->revalidateClient->send($data);
   }
 
 }
@@ -289,27 +307,23 @@ services:
 
 ## Next.js revalidation handler
 
-See [Next.js integration](nextjs.md) for the full route handler. Key mapping:
-
-```typescript
-// Map Drupal tags to Next.js cache tags used in fetch()
-const TAG_MAP: Record<string, string> = {
-  'node_list:article': 'node_list:article',
-  'node:': 'node:article', // prefix match
-};
-
-export function mapDrupalTags(drupalTags: string[]): string[] {
-  return drupalTags.map((tag) => TAG_MAP[tag] ?? tag);
-}
-```
+See [Next.js integration](nextjs.md) for the full route handler. No tag mapping is needed: tag your `fetch()` calls with the same cache tags Drupal invalidates, and pass the tags from the webhook straight to `revalidateTag()`.
 
 Use matching tags in fetch calls:
 
 ```typescript
+// List pages: the bundle list tag, invalidated whenever any article changes
 const articles = await drupal.getResourceCollection('node--article', {
   next: { tags: ['node_list:article'] },
 });
+
+// Detail pages: the entity's own tag, node:{nid}
+const article = await drupal.getResource('node--article', uuid, {
+  next: { tags: [`node:${nid}`] },
+});
 ```
+
+A tag Drupal never emits, such as `node:article`, is never revalidated. To find a node's ID from a path before fetching it, use `drupal.translatePath()` (see [Next.js integration](nextjs.md)).
 
 ## JSON:API cache headers
 

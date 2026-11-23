@@ -6,7 +6,7 @@ Drupal 11 supports two hook implementation styles:
 2. **Legacy procedural hooks** — functions named `example_module_hook_name()` in `.module` or `.install`
 
 !!! note "Drupal 11.1+ OOP hooks"
-    OOP hooks are stable in Drupal 11.1+. New custom code should prefer `#[Hook]` classes. Procedural hooks remain fully supported for backward compatibility and hooks without OOP coverage yet.
+    OOP hooks are stable in Drupal 11.1+. New custom code should prefer `#[Hook]` classes. Procedural hooks remain fully supported for backward compatibility and hooks without OOP coverage yet (for example `.install` hooks such as `hook_schema()`). Module preprocess hooks (`#[Hook('preprocess_HOOK')]`) and the hook ordering attributes require **Drupal 11.2+**.
 
 ---
 
@@ -164,6 +164,8 @@ function example_module_form_alter(array &$form, FormStateInterface $form_state,
 
 /**
  * Implements hook_preprocess_HOOK() for blocks.
+ *
+ * On Drupal 11.2+ this can be #[Hook('preprocess_block')] instead.
  */
 function example_module_preprocess_block(array &$variables): void {
   if (($variables['plugin_id'] ?? '') === 'example_module_greeting_block') {
@@ -236,7 +238,7 @@ function example_module_uninstall(): void {
 |--------|---------------|------------|
 | Discovery | Auto-scanned in `src/Hook/` | Function name convention |
 | Dependency injection | Constructor injection via autowired services | `\Drupal::service()` |
-| Testing | Instantiate class, call method | `module_load_include()` or kernel tests |
+| Testing | Instantiate class, call method | `\Drupal::moduleHandler()->loadInclude()` or kernel tests |
 | IDE support | Full type hints on parameters | Docblock `@param` required |
 | Recommendation | **Use for new code** | Use when OOP hook missing or for `.install` |
 
@@ -244,7 +246,18 @@ function example_module_uninstall(): void {
 
 ## Injecting services into OOP hooks
 
-Hook classes support constructor injection when the class is registered as a service. For most hooks, Drupal auto-wires dependencies:
+Classes in `src/Hook/` are registered as autowired services, so constructor arguments are resolved **by type**. Core interfaces such as `ConfigFactoryInterface` already have class aliases; your own services need one:
+
+```yaml
+# example_module.services.yml
+services:
+  example_module.greeting_generator:
+    class: Drupal\example_module\Service\GreetingGenerator
+    arguments: ['@config.factory', '@string_translation']
+
+  # Lets autowiring resolve the GreetingGenerator type-hint.
+  Drupal\example_module\Service\GreetingGenerator: '@example_module.greeting_generator'
+```
 
 ```php
 <?php
@@ -279,7 +292,7 @@ final class ExampleServiceHooks {
 }
 ```
 
-If autowiring fails, register the hook class explicitly:
+Alternatively, register the hook class explicitly (Drupal only auto-registers it when no service with that class name exists):
 
 ```yaml
 # example_module.services.yml
@@ -289,6 +302,65 @@ services:
       - '@example_module.greeting_generator'
       - '@config.factory'
 ```
+
+---
+
+## Hook ordering (11.2+)
+
+Drupal 11.2 replaced `hook_module_implements_alter()` with attributes. Pass `order:` to `#[Hook]` to position your own implementation, and use `#[RemoveHook]` / `#[ReorderHook]` to change another module's OOP implementation:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\example_module\Hook;
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Hook\Attribute\Hook;
+use Drupal\Core\Hook\Attribute\RemoveHook;
+use Drupal\Core\Hook\Attribute\ReorderHook;
+use Drupal\Core\Hook\Order\Order;
+use Drupal\Core\Hook\Order\OrderAfter;
+use Drupal\Core\Hook\Order\OrderBefore;
+use Drupal\contrib_module\Hook\ContribHooks;
+
+/**
+ * Hook implementations with explicit ordering.
+ */
+#[RemoveHook('page_attachments', class: ContribHooks::class, method: 'pageAttachments')]
+#[ReorderHook('cron', class: ContribHooks::class, method: 'cron', order: Order::First)]
+final class OrderedHooks {
+
+  /**
+   * Implements hook_form_alter(), after all other implementations.
+   */
+  #[Hook('form_alter', order: Order::Last)]
+  public function formAlter(array &$form, FormStateInterface $form_state, string $form_id): void {
+    // ...
+  }
+
+  /**
+   * Implements hook_entity_presave(), before content_moderation's.
+   */
+  #[Hook('entity_presave', order: new OrderBefore(modules: ['content_moderation']))]
+  public function entityPresave(EntityInterface $entity): void {
+    // ...
+  }
+
+  /**
+   * Implements hook_entity_insert(), after a specific implementation.
+   */
+  #[Hook('entity_insert', order: new OrderAfter(classesAndMethods: [[ContribHooks::class, 'entityInsert']]))]
+  public function entityInsert(EntityInterface $entity): void {
+    // ...
+  }
+
+}
+```
+
+`Order` is an enum (`Order::First`, `Order::Last`); `OrderBefore` / `OrderAfter` take `modules` and/or `classesAndMethods`. A module that must also support Drupal < 11.2 can keep its `hook_module_implements_alter()` and mark it `#[LegacyModuleImplementsAlter]` so it is skipped where attribute ordering is available.
 
 ---
 
@@ -326,10 +398,17 @@ final class Notifier {
 Other modules implement `hook_example_module_notify()` or `#[Hook('example_module_notify')]` to receive the event.
 
 !!! warning "Do not mix duplicate implementations"
-    Implement each hook in **either** OOP or procedural form, not both. If both exist, behavior is undefined.
+    Implement each hook in **either** OOP or procedural form, not both — if a module has both, **both run**. To keep a procedural fallback for sites older than Drupal 11.1, mark the function with `#[LegacyHook]` (`Drupal\Core\Hook\Attribute\LegacyHook`) and delegate to the hook class; Drupal 11.1+ then skips it:
+
+    ```php
+    #[LegacyHook]
+    function example_module_cron(): void {
+      \Drupal::service(ExampleHooks::class)->cron();
+    }
+    ```
 
 !!! tip "Find hook implementations"
-    `ModuleHandler::getImplementations()` was removed in Drupal 11. Use `invokeAllWith()` to inspect which modules implement a hook:
+    `ModuleHandler::getImplementations()` was deprecated in Drupal 9.4 and removed in 10.0. Use `hasImplementations()` to check for implementations, or `invokeAllWith()` to inspect which modules implement a hook:
 
     ```bash
     ddev drush php:eval "\Drupal::service('module_handler')->invokeAllWith('cron', function (callable \$hook, string \$module) { print \$module . PHP_EOL; });"

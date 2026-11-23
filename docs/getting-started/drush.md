@@ -35,7 +35,7 @@ drush pm:list --type=module
 # Enable modules
 drush en jsonapi rest serialization -y
 
-# Disable modules
+# Uninstall modules (Drupal 8+ has no "disable")
 drush pm:uninstall devel -y
 
 # Check security advisories
@@ -64,8 +64,8 @@ drush config:set system.site name "My Headless Site" -y
 ### Entity operations
 
 ```bash
-# List content types
-drush entity:info
+# List content types (machine names)
+drush php:eval "print_r(array_keys(\Drupal\node\Entity\NodeType::loadMultiple()));"
 
 # Create a node
 drush php:eval "
@@ -114,7 +114,7 @@ drush sql:cli < backup.sql
 drush generate module
 
 # Generate a service
-drush generate service
+drush generate service:custom
 
 # Generate a plugin
 drush generate plugin:block
@@ -135,8 +135,8 @@ drush route
 # Find a specific route
 drush route | grep jsonapi
 
-# Debug a route
-drush route:debug jsonapi.node--article--canonical
+# Show details for one route (path, controller, requirements)
+drush route --name=jsonapi.node--article.individual
 ```
 
 ### Queue and cron
@@ -161,8 +161,10 @@ See [Drush Commands](../custom-coding/drush-commands.md) for building your own.
 
 declare(strict_types=1);
 
-namespace Drupal\my_module\Commands;
+// src/Drush/Commands/MyModuleCommands.php (auto-discovered by Drush 12+)
+namespace Drupal\my_module\Drush\Commands;
 
+use Drush\Attributes as CLI;
 use Drush\Commands\DrushCommands;
 
 final class MyModuleCommands extends DrushCommands {

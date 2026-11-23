@@ -57,12 +57,15 @@ graph LR
 
 ```php
 // core/lib/Drupal/Core/DrupalKernel.php (conceptual)
-class DrupalKernel extends HttpKernel {
+// DrupalKernelInterface extends Symfony's HttpKernelInterface.
+class DrupalKernel implements DrupalKernelInterface, TerminableInterface {
   public function handle(
     Request $request,
     int $type = HttpKernelInterface::MAIN_REQUEST,
     bool $catch = TRUE,
   ): Response {
+    // Boots the container, then delegates to the `http_kernel` service:
+    // the middleware stack wrapping Symfony's HttpKernel.
   }
 }
 ```
@@ -79,7 +82,7 @@ services:
     arguments: ['@entity_type.manager', '@logger.channel.my_module']
 ```
 
-At compile time, Drupal's `DrupalContainerBuilder` (extending Symfony's) merges all `*.services.yml` files.
+At compile time, Drupal's `Drupal\Core\DependencyInjection\ContainerBuilder` (extending Symfony's) merges all `*.services.yml` files.
 
 ### EventDispatcher powers hooks and subscribers
 
@@ -94,14 +97,12 @@ $event = new ProductCreatedEvent($product);
 
 ### Serializer powers JSON:API
 
-JSON:API uses Symfony's Serializer with Drupal-specific normalizers:
+JSON:API uses Symfony's Serializer with Drupal-specific normalizers. It has its own internal `jsonapi.serializer` service and `api_json` format; the general-purpose `serializer` service (Serialization module) is what custom code uses:
 
 ```php
-// Simplified flow
+// Core Serialization module: plain JSON of an entity
 $serializer = \Drupal::service('serializer');
-$json = $serializer->serialize($node, 'json', [
-  'jsonapi_include' => ['field_image', 'uid'],
-]);
+$json = $serializer->serialize($node, 'json');
 ```
 
 ## Component reference

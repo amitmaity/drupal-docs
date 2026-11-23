@@ -138,7 +138,8 @@ composer create-project drupal/recommended-project my-headless-site
 
 # 2. Enable API modules
 cd my-headless-site
-composer require drupal/jsonapi_extras drupal/simple_oauth
+composer require drush/drush drupal/jsonapi_extras drupal/simple_oauth
+# (install the site first: see Getting Started → Fresh Installation)
 drush en jsonapi jsonapi_extras simple_oauth consumers -y
 
 # 3. Configure CORS (web/sites/default/services.yml)

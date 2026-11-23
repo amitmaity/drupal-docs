@@ -350,6 +350,7 @@ namespace Drupal\Tests\my_module\Unit\Service;
 
 use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Entity\Query\QueryInterface;
 use Drupal\my_module\Service\ProductManager;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -371,9 +372,12 @@ final class ProductManagerTest extends UnitTestCase {
   }
 
   public function testLoadBySkuReturnsNullWhenNotFound(): void {
-    $this->storage->method('getQuery')->willReturn(
-      $this->createQueryStub([]),
-    );
+    $query = $this->createMock(QueryInterface::class);
+    $query->method('accessCheck')->willReturnSelf();
+    $query->method('condition')->willReturnSelf();
+    $query->method('range')->willReturnSelf();
+    $query->method('execute')->willReturn([]);
+    $this->storage->method('getQuery')->willReturn($query);
 
     $manager = new ProductManager($this->entityTypeManager);
     $this->assertNull($manager->loadBySku('MISSING-SKU'));

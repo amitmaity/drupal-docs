@@ -56,6 +56,7 @@ namespace Drupal\example_module\Entity;
 
 use Drupal\Core\Config\Entity\ConfigEntityBase;
 use Drupal\Core\Entity\Attribute\ConfigEntityType;
+use Drupal\Core\Entity\Routing\AdminHtmlRouteProvider;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\example_module\Form\ImporterForm;
 use Drupal\example_module\ImporterInterface;
@@ -82,6 +83,11 @@ use Drupal\example_module\ImporterListBuilder;
       'add' => ImporterForm::class,
       'edit' => ImporterForm::class,
       'delete' => 'Drupal\Core\Entity\EntityDeleteForm',
+    ],
+    // Generates the add/edit/delete form and collection routes from the
+    // link templates below.
+    'route_provider' => [
+      'html' => AdminHtmlRouteProvider::class,
     ],
   ],
   links: [
@@ -219,7 +225,7 @@ namespace Drupal\example_module\Form;
 
 use Drupal\Core\Entity\EntityForm;
 use Drupal\Core\Form\FormStateInterface;
-use Drupal\example_module\ImporterInterface;
+use Drupal\example_module\Entity\Importer;
 
 /**
  * Form for Importer config entities.
@@ -245,7 +251,9 @@ final class ImporterForm extends EntityForm {
       '#type' => 'machine_name',
       '#default_value' => $importer->id(),
       '#machine_name' => [
-        'exists' => ImporterInterface::class . '::load',
+        // Must be the concrete class: static methods cannot be called on an
+        // interface.
+        'exists' => Importer::class . '::load',
       ],
       '#disabled' => !$importer->isNew(),
     ];
@@ -301,11 +309,12 @@ final class ImporterForm extends EntityForm {
 ```yaml
 id: default
 label: 'Default importer'
-uuid: ''
 source_url: 'https://example.com/feed.json'
 enabled: true
 interval: 3600
 ```
+
+Do not include `uuid` (or `_core`) in `config/install` files — Drupal generates them when the config is installed.
 
 ---
 

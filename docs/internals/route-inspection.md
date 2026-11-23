@@ -5,26 +5,23 @@ Routes are the map between URLs and controllers. When you get unexpected 404s, w
 ## Drush route commands
 
 ```bash
-# List all routes (paginated — pipe to less)
+# List all routes (name → path) — pipe to less
 drush route | less
 
-# Filter by route name
+# Full details for one route (exact route name)
 drush route --name=entity.node.canonical
 
-# Filter by path
-drush route --path=/node
-
-# Get full details for one route
-drush route:get entity.node.canonical
+# Details of the route that serves a path
+drush route --path=/node/1
 
 # Get JSON output for scripting
-drush route:get my_module.api_product --format=json | jq .
+drush route --name=my_module.api_product --format=json | jq .
 ```
 
 ### Example output
 
 ```bash
-$ drush route:get my_module.api_product
+$ drush route --name=my_module.api_product
 name: my_module.api_product
 path: '/api/products/{product}'
 defaults:
@@ -36,7 +33,6 @@ options:
   parameters:
     product:
       type: entity:product
-methods: GET
 ```
 
 ## Programmatic route lookup
@@ -61,10 +57,13 @@ try {
 drush php:eval "
 \$access_manager = \Drupal::service('access_manager');
 \$account = \Drupal::currentUser();
-\$result = \$access_manager->checkNamedRoute('my_module.api_product', ['product' => '42'], \$account);
+// Pass TRUE as the 4th argument to get an AccessResult object instead of a bool.
+\$result = \$access_manager->checkNamedRoute('my_module.api_product', ['product' => '42'], \$account, TRUE);
 echo \$result->isAllowed() ? 'ALLOWED' : 'FORBIDDEN';
 echo PHP_EOL;
-echo 'Reason: ' . (\$result->getReason() ?? 'none');
+if (\$result instanceof \Drupal\Core\Access\AccessResultReasonInterface) {
+  echo 'Reason: ' . (\$result->getReason() ?: 'none');
+}
 "
 ```
 
@@ -91,7 +90,7 @@ foreach (\$routes as \$name => \$route) {
 flowchart TD
     A[getRouteByName] --> B{In static cache?}
     B -->|Yes| C[Return Route]
-    B -->|No| D[Load from cache.data]
+    B -->|No| D[Load from cache.routes, else router table]
     D --> E[Populate static cache]
     E --> C
 
@@ -130,11 +129,12 @@ interface RouteProviderInterface {
 
 ### Route cache bins
 
-| Cache | Purpose |
-|-------|---------|
-| `cache.data` | Serialized route objects keyed by name |
+| Storage / cache | Purpose |
+|-----------------|---------|
+| `router` database table | Canonical store of all routes, written by `router.builder` on rebuild |
+| `cache.data` | Candidate route collections per request path (tag `route_match`) |
+| `cache.routes` | Route objects loaded by name (tag `routes`) |
 | Static `$routes` | In-request memory cache on RouteProvider |
-| `router` service | Matcher with compiled regex tree |
 
 ```bash
 # Invalidate route cache
@@ -164,8 +164,9 @@ echo $parameters['_route']; // 'entity.node.canonical'
 
 ```mermaid
 graph LR
-    RP[router.route_provider] -->|Route objects| RB[router.builder]
-    RB -->|Rebuild| R[router]
+    RB[router.builder] -->|Rebuild| T[(router table)]
+    T -->|Route objects| RP[router.route_provider]
+    RP -->|candidate routes| R[router]
     R -->|match path| RM[current_route_match]
 ```
 
@@ -186,8 +187,8 @@ foreach (\$routes as \$name => \$route) {
 echo \"Views routes: \$views\" . PHP_EOL;
 "
 
-# Entity canonical routes
-drush route --name=entity.product
+# Entity canonical route (--name needs the exact route name)
+drush route --name=entity.product.canonical
 ```
 
 ### Rebuild after Views change
@@ -230,11 +231,11 @@ final class DebugRouteSubscriber extends RouteSubscriberBase {
 
 ```bash
 # Compare route before/after by exporting
-drush route:get system.admin --format=yaml > /tmp/route-before.yaml
+drush route --name=system.admin --format=yaml > /tmp/route-before.yaml
 # Disable suspect module, rebuild
 drush pm:uninstall suspect_module -y
 drush cr
-drush route:get system.admin --format=yaml > /tmp/route-after.yaml
+drush route --name=system.admin --format=yaml > /tmp/route-after.yaml
 diff /tmp/route-before.yaml /tmp/route-after.yaml
 ```
 
@@ -266,7 +267,8 @@ Test converter directly:
 
 ```bash
 drush php:eval "
-\$converter = \Drupal::service('paramconverter_manager')->getConverter('entity');
+// Converters are keyed by service ID.
+\$converter = \Drupal::service('paramconverter_manager')->getConverter('paramconverter.entity');
 \$entity = \$converter->convert('42', ['type' => 'entity:product'], 'product', []);
 echo \$entity ? get_class(\$entity) . ' #' . \$entity->id() : 'NULL';
 "
@@ -319,9 +321,9 @@ php scripts/dump-api-routes.php
 | Symptom | Command | What to look for |
 |---------|---------|------------------|
 | 404 on custom path | `drush route --path=/your/path` | Route missing → enable module, rebuild |
-| 403 on valid route | `drush route:get ROUTE_NAME` | `_permission`, `_role`, `_entity_access` |
-| Wrong controller | `drush route:get ROUTE_NAME` | `defaults._controller` value |
-| Parameter is string | `drush route:get ROUTE_NAME` | `options.parameters.type` |
+| 403 on valid route | `drush route --name=ROUTE_NAME` | `_permission`, `_role`, `_entity_access` |
+| Wrong controller | `drush route --name=ROUTE_NAME` | `defaults._controller` value |
+| Parameter is string | `drush route --name=ROUTE_NAME` | `options.parameters.type` |
 | Route exists but old | `drush cr` | Stale route cache |
 
 !!! note "router.no_access_checks"

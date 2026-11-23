@@ -84,9 +84,10 @@ REST resources return `ResourceResponse` objects that are serialized using confi
     declare(strict_types=1);
 
     $serializer = \Drupal::service('serializer');
-    $data = $serializer->deserialize(
+    // decode() only runs the encoder. deserialize() needs a target class and
+    // has no denormalizer for the plain 'array' type.
+    $data = $serializer->decode(
       '{"title":"Imported article","type":"article"}',
-      'array',
       'json',
     );
     ```
@@ -159,36 +160,41 @@ services:
 
 To expose a custom entity via JSON:API, define an entity type with proper handlers — JSON:API auto-discovers resource types. For field-level customization, use normalizers or JSON:API's `ResourceType` alter hooks.
 
-=== "Entity type annotation (excerpt)"
+=== "Entity type attribute (excerpt)"
 
     ```php
     <?php
 
     declare(strict_types=1);
 
-    /**
-     * @ContentEntityType(
-     *   id = "product",
-     *   label = @Translation("Product"),
-     *   base_table = "product",
-     *   entity_keys = {
-     *     "id" = "id",
-     *     "label" = "title",
-     *     "uuid" = "uuid",
-     *   },
-     *   handlers = {
-     *     "view_builder" = "Drupal\Core\Entity\EntityViewBuilder",
-     *     "list_builder" = "Drupal\my_module\ProductListBuilder",
-     *     "form" = {
-     *       "default" = "Drupal\my_module\Form\ProductForm",
-     *     },
-     *     "access" = "Drupal\my_module\ProductAccessControlHandler",
-     *   },
-     *   links = {
-     *     "canonical" = "/product/{product}",
-     *   },
-     * )
-     */
+    use Drupal\Core\Entity\Attribute\ContentEntityType;
+    use Drupal\Core\Entity\EntityViewBuilder;
+    use Drupal\Core\StringTranslation\TranslatableMarkup;
+    use Drupal\my_module\Form\ProductForm;
+    use Drupal\my_module\ProductAccessControlHandler;
+    use Drupal\my_module\ProductListBuilder;
+
+    #[ContentEntityType(
+      id: 'product',
+      label: new TranslatableMarkup('Product'),
+      entity_keys: [
+        'id' => 'id',
+        'label' => 'title',
+        'uuid' => 'uuid',
+      ],
+      handlers: [
+        'view_builder' => EntityViewBuilder::class,
+        'list_builder' => ProductListBuilder::class,
+        'form' => [
+          'default' => ProductForm::class,
+        ],
+        'access' => ProductAccessControlHandler::class,
+      ],
+      links: [
+        'canonical' => '/product/{product}',
+      ],
+      base_table: 'product',
+    )]
     ```
 
 === "JSON:API response (after enabling jsonapi_extras optional)"

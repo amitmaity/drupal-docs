@@ -6,6 +6,7 @@ A complete custom field requires three plugins: **field type** (data storage), *
 
 ```
 example_module/
+├── config/schema/example_module.schema.yml
 └── src/Plugin/Field/
     ├── FieldType/
     │   └── ColorFieldType.php
@@ -51,7 +52,13 @@ final class ColorFieldType extends FieldItemBase {
   public static function propertyDefinitions(FieldStorageDefinitionInterface $field_definition): array {
     $properties['value'] = DataDefinition::create('string')
       ->setLabel(t('Hex color'))
-      ->setRequired(TRUE);
+      ->setRequired(TRUE)
+      // Checked whenever the entity is validated (entity forms, REST,
+      // JSON:API, or an explicit $entity->validate()).
+      ->addConstraint('Regex', [
+        'pattern' => '/^#[0-9A-Fa-f]{6}$/',
+        'message' => 'Enter a valid hex color (e.g. #FF0000).',
+      ]);
 
     return $properties;
   }
@@ -103,6 +110,32 @@ final class ColorFieldType extends FieldItemBase {
 
 }
 ```
+
+---
+
+## Config schema — `config/schema/example_module.schema.yml`
+
+Field settings and default values are stored in `field.field.*` config, so they need schema. Without it, saving the field fails strict schema checks in Kernel and Functional tests.
+
+```yaml
+field.field_settings.example_color:
+  type: mapping
+  label: 'Color field settings'
+  mapping:
+    default_color:
+      type: string
+      label: 'Default color'
+
+field.value.example_color:
+  type: mapping
+  label: 'Default value'
+  mapping:
+    value:
+      type: string
+      label: 'Hex color'
+```
+
+The field type has no storage settings, so core's `field.storage_settings.*` fallback covers storage config.
 
 ---
 
@@ -284,19 +317,9 @@ FieldConfig::create([
 
 ---
 
-## Validation example (optional widget validate)
+## Validation
 
-```php
-/**
- * {@inheritdoc}
- */
-public function validateElement(array $element, FormStateInterface $form_state): void {
-  $value = $element['value']['#value'] ?? '';
-  if ($value !== '' && !preg_match('/^#[0-9A-Fa-f]{6}$/', (string) $value)) {
-    $form_state->setError($element, $this->t('Enter a valid hex color (e.g. #FF0000).'));
-  }
-}
-```
+Validate in the field type, not the widget. The `Regex` constraint added in `propertyDefinitions()` runs during entity validation, so it covers entity forms (errors are mapped back to the widget element) as well as REST, JSON:API and programmatic saves that call `$entity->validate()`. Widgets have no automatically invoked `validateElement()` method; widget-only checks need an `#element_validate` callback.
 
 !!! note "Field type ID"
     The `id` in `#[FieldType]` becomes the `type` value in field storage config (`example_color`).

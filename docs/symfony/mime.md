@@ -33,8 +33,8 @@ Drupal validates uploaded files against allowed extensions and MIME types in `Fi
 
 declare(strict_types=1);
 
+use Drupal\file\Plugin\Validation\Constraint\FileExtensionConstraint;
 use Drupal\file\Validation\FileValidator;
-use Drupal\file\Validation\Constraint\FileExtensionConstraint;
 use Symfony\Component\Mime\MimeTypes;
 
 // Core uses symfony/mime internally when validating file entities.
@@ -114,29 +114,41 @@ $response->headers->set('Content-Type', 'application/pdf');
 
     declare(strict_types=1);
 
-    namespace Drupal\my_module\FileValidation;
+    // Constraint plugins are discovered only in src/Plugin/Validation/Constraint.
+    namespace Drupal\my_module\Plugin\Validation\Constraint;
 
-    use Drupal\file\Validation\Constraint\BaseConstraintValidator;
+    use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
+    use Drupal\Core\File\FileSystemInterface;
+    use Drupal\file\Plugin\Validation\Constraint\BaseFileConstraintValidator;
+    use Symfony\Component\DependencyInjection\ContainerInterface;
     use Symfony\Component\Mime\FileinfoMimeTypeGuesser;
     use Symfony\Component\Validator\Constraint;
 
     /**
      * Validates allowed MIME types by file content, not extension.
      *
+     * Symfony resolves the validator as the constraint class name + "Validator".
+     *
      * @internal
      */
-    final class AllowedMimeTypeValidator extends BaseConstraintValidator {
+    final class AllowedMimeTypeConstraintValidator extends BaseFileConstraintValidator implements ContainerInjectionInterface {
+
+      public function __construct(
+        private readonly FileSystemInterface $fileSystem,
+      ) {}
+
+      public static function create(ContainerInterface $container): static {
+        return new static($container->get('file_system'));
+      }
 
       public function validate(mixed $value, Constraint $constraint): void {
         assert($constraint instanceof AllowedMimeTypeConstraint);
 
-        if ($value === NULL) {
-          return;
-        }
+        $file = $this->assertValueIsFile($value);
+        $path = $this->fileSystem->realpath($file->getFileUri());
 
         $guesser = new FileinfoMimeTypeGuesser();
-        $path = $value->getRealPath();
-        $detected = $guesser->guessMimeType($path);
+        $detected = $path ? $guesser->guessMimeType($path) : NULL;
 
         if ($detected === NULL || !in_array($detected, $constraint->allowedTypes, TRUE)) {
           $this->context->addViolation($constraint->message, [
@@ -156,17 +168,18 @@ $response->headers->set('Content-Type', 'application/pdf');
 
     declare(strict_types=1);
 
-    namespace Drupal\my_module\FileValidation;
+    namespace Drupal\my_module\Plugin\Validation\Constraint;
 
-    use Symfony\Component\Validator\Constraint;
+    use Drupal\Core\StringTranslation\TranslatableMarkup;
+    use Drupal\Core\Validation\Attribute\Constraint;
+    use Symfony\Component\Validator\Constraint as SymfonyConstraint;
 
-    /**
-     * @Constraint(
-     *   id = "MyModuleAllowedMimeType",
-     *   label = @Translation("Allowed MIME type by content", context = "Validation"),
-     * )
-     */
-    final class AllowedMimeTypeConstraint extends Constraint {
+    #[Constraint(
+      id: 'MyModuleAllowedMimeType',
+      label: new TranslatableMarkup('Allowed MIME type by content', [], ['context' => 'Validation']),
+      type: 'file',
+    )]
+    final class AllowedMimeTypeConstraint extends SymfonyConstraint {
 
       /** @var list<string> */
       public array $allowedTypes = [
@@ -191,8 +204,8 @@ $response->headers->set('Content-Type', 'application/pdf');
 
     use Drupal\Core\Form\FormBase;
     use Drupal\Core\Form\FormStateInterface;
-    use Drupal\file\Validation\Constraint\FileExtensionConstraint;
-    use Drupal\my_module\FileValidation\AllowedMimeTypeConstraint;
+    use Drupal\file\Plugin\Validation\Constraint\FileExtensionConstraint;
+    use Drupal\my_module\Plugin\Validation\Constraint\AllowedMimeTypeConstraint;
 
     final class ImageUploadForm extends FormBase {
 

@@ -37,10 +37,11 @@ Install Drupal 11 with Composer and DDEV:
 
 ```bash
 mkdir my-drupal-site && cd my-drupal-site
-ddev config --project-type=drupal11 --docroot=web --create-docroot
+ddev config --project-type=drupal11 --docroot=web
 ddev start
 ddev composer create "drupal/recommended-project:^11" --no-install
 ddev composer install
+ddev composer require drush/drush
 ddev drush site:install --account-name=admin --account-pass=admin -y
 ```
 

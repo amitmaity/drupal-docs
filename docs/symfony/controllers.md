@@ -7,9 +7,9 @@ In Symfony, a controller is any callable that returns a `Response`. Drupal stand
 | Pattern | Symfony | Drupal |
 |---------|---------|--------|
 | Base class | `AbstractController` | `ControllerBase` |
-| DI | Constructor autowiring | `create()` + `*.services.yml` |
+| DI | Constructor autowiring | Constructor autowiring by type (`ControllerBase` uses `AutowireTrait`, 10.2+) or an explicit `create()` |
 | Return type | `Response` | `array` (render array) or `Response`/`JsonResponse` |
-| Registration | Attributes or YAML | `*.routing.yml` only |
+| Registration | Attributes or YAML | `*.routing.yml`, or Symfony `#[Route]` attributes on classes in `src/Controller` (11.4+) |
 
 ## How Drupal uses controllers
 
@@ -33,7 +33,7 @@ abstract class MyModuleControllerBase extends ControllerBase {
 
 ### Dependency injection via `create()`
 
-Drupal does not autowire controllers. Define the controller as a service or implement `ContainerInjectionInterface`:
+`ControllerBase` implements `ContainerInjectionInterface` and, since Drupal 10.2, uses `AutowireTrait`. Constructor arguments are therefore autowired by type wherever a service is aliased to that class or interface. Write an explicit `create()`, as below, when a dependency has no alias (for example a custom service with no class alias):
 
 ```php
 <?php
@@ -78,15 +78,12 @@ services:
   my_module.product_repository:
     class: Drupal\my_module\Service\ProductRepository
     arguments: ['@entity_type.manager', '@database']
-
-  Drupal\my_module\Controller\ProductController:
-    arguments: ['@my_module.product_repository']
-    tags:
-      - { name: controller.service_arguments }
+  # Optional: this alias lets ControllerBase autowire the repository without create().
+  Drupal\my_module\Service\ProductRepository: '@my_module.product_repository'
 ```
 
-!!! note "controller.service_arguments tag"
-    This tag tells Drupal to use the service definition instead of instantiating the class with `new`.
+!!! note "No controller service needed"
+    Drupal instantiates controllers through the class resolver. It uses a service whose ID is the class name if one exists, and otherwise calls `create()`, which autowires in `ControllerBase`. Symfony's `controller.service_arguments` tag has no effect in Drupal, so you do not need to register the controller as a service.
 
 ## JSON controllers
 
@@ -165,22 +162,22 @@ declare(strict_types=1);
 
 namespace Drupal\my_module\Plugin\rest\resource;
 
+use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\rest\Attribute\RestResource;
 use Drupal\rest\ModifiedResourceResponse;
 use Drupal\rest\Plugin\ResourceBase;
 use Drupal\rest\ResourceResponse;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
-/**
- * @RestResource(
- *   id = "product",
- *   label = @Translation("Product"),
- *   uri_paths = {
- *     "canonical" = "/api/rest/product/{id}",
- *     "create" = "/api/rest/product"
- *   }
- * )
- */
+#[RestResource(
+  id: 'product',
+  label: new TranslatableMarkup('Product'),
+  uri_paths: [
+    'canonical' => '/api/rest/product/{id}',
+    'create' => '/api/rest/product',
+  ],
+)]
 final class ProductResource extends ResourceBase {
 
   public function __construct(
@@ -257,6 +254,7 @@ declare(strict_types=1);
 
 namespace Drupal\my_module\Controller;
 
+use Drupal\Core\Controller\ControllerBase;
 use Drupal\my_module\Entity\Product;
 
 final class ProductController extends ControllerBase {

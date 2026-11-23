@@ -31,12 +31,14 @@ namespace Drupal\example_module\Entity;
 use Drupal\Core\Entity\Attribute\ContentEntityType;
 use Drupal\Core\Entity\ContentEntityBase;
 use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Entity\Routing\AdminHtmlRouteProvider;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\example_module\Form\TaskForm;
 use Drupal\example_module\TaskAccessControlHandler;
 use Drupal\example_module\TaskInterface;
 use Drupal\example_module\TaskListBuilder;
+use Drupal\user\EntityOwnerTrait;
 
 /**
  * Defines the Task entity.
@@ -63,6 +65,11 @@ use Drupal\example_module\TaskListBuilder;
     ],
     'access' => TaskAccessControlHandler::class,
     'views_data' => 'Drupal\views\EntityViewsData',
+    // Generates the canonical, add/edit/delete form and collection routes
+    // from the link templates below.
+    'route_provider' => [
+      'html' => AdminHtmlRouteProvider::class,
+    ],
   ],
   links: [
     'canonical' => '/admin/content/task/{example_task}',
@@ -80,11 +87,16 @@ use Drupal\example_module\TaskListBuilder;
 )]
 final class Task extends ContentEntityBase implements TaskInterface {
 
+  use EntityOwnerTrait;
+
   /**
    * {@inheritdoc}
    */
   public static function baseFieldDefinitions(EntityTypeInterface $entity_type): array {
     $fields = parent::baseFieldDefinitions($entity_type);
+    // Adds the 'uid' field for the 'owner' entity key, with a default value
+    // callback that returns the current user.
+    $fields += static::ownerBaseFieldDefinitions($entity_type);
 
     $fields['title'] = BaseFieldDefinition::create('string')
       ->setLabel(t('Title'))
@@ -125,10 +137,8 @@ final class Task extends ContentEntityBase implements TaskInterface {
         'weight' => 2,
       ]);
 
-    $fields['uid'] = BaseFieldDefinition::create('entity_reference')
+    $fields['uid']
       ->setLabel(t('Author'))
-      ->setSetting('target_type', 'user')
-      ->setDefaultValueCallback(self::class . '::getCurrentUserId')
       ->setDisplayOptions('view', [
         'label' => 'inline',
         'type' => 'author',
@@ -142,13 +152,6 @@ final class Task extends ContentEntityBase implements TaskInterface {
       ->setLabel(t('Changed'));
 
     return $fields;
-  }
-
-  /**
-   * Default value callback for the uid field.
-   */
-  public static function getCurrentUserId(): array {
-    return [\Drupal::currentUser()->id()];
   }
 
   /**
@@ -181,11 +184,12 @@ declare(strict_types=1);
 namespace Drupal\example_module;
 
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\user\EntityOwnerInterface;
 
 /**
  * Interface for Task entities.
  */
-interface TaskInterface extends ContentEntityInterface {
+interface TaskInterface extends ContentEntityInterface, EntityOwnerInterface {
 
   public function isCompleted(): bool;
 
@@ -307,8 +311,15 @@ final class TaskAccessControlHandler extends EntityAccessControlHandler {
     }
 
     if (in_array($operation, ['update', 'delete'], TRUE)) {
+      // IDs may be strings or ints depending on the source; compare as ints.
+      $is_owner = (int) $entity->getOwnerId() === (int) $account->id();
+
       return AccessResult::allowedIfHasPermission($account, 'edit example tasks')
-        ->orIf(AccessResult::allowedIf($entity->getOwnerId() === $account->id()));
+        ->orIf(
+          AccessResult::allowedIf($is_owner)
+            ->cachePerUser()
+            ->addCacheableDependency($entity),
+        );
     }
 
     return AccessResult::neutral();

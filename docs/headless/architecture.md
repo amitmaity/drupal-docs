@@ -225,7 +225,7 @@ ls config/sync/ | grep -E 'jsonapi|rest|cors|oauth'
 
 Typical headless config entities:
 
-- `jsonapi.settings.yml` — read-only mode, base path
+- `jsonapi.settings.yml` — read-only mode (the `/jsonapi` base path is not config: it is the `jsonapi.base_path` container parameter, overridable in `services.yml`)
 - `rest.resource.*.yml` — REST resource configuration
 - `user.role.api_consumer.yml` — API consumer role
 - `simple_oauth.settings.yml` — OAuth settings

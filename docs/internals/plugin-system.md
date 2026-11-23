@@ -205,7 +205,7 @@ final class Report extends Plugin {
 
 ### YAML discovery
 
-Some plugin types use YAML files in `config/schema` or module roots:
+Some plugin types use YAML files in the module root (for example `*.links.menu.yml`):
 
 ```yaml
 # my_module.my_plugins.yml (hypothetical plugin type)
@@ -230,9 +230,12 @@ namespace Drupal\my_module\Plugin\Derivative;
 
 use Drupal\Component\Plugin\Derivative\DeriverBase;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Plugin\Discovery\ContainerDeriverInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
-final class ProductBlockDeriver extends DeriverBase {
+// ContainerDeriverInterface makes discovery call create(); without it the
+// constructor receives the base plugin ID instead of services.
+final class ProductBlockDeriver extends DeriverBase implements ContainerDeriverInterface {
 
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -265,6 +268,8 @@ declare(strict_types=1);
 namespace Drupal\my_module\Plugin\Block;
 
 use Drupal\Core\Block\Attribute\Block;
+use Drupal\Core\Block\BlockBase;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\my_module\Plugin\Derivative\ProductBlockDeriver;
 
 #[Block(
@@ -273,7 +278,14 @@ use Drupal\my_module\Plugin\Derivative\ProductBlockDeriver;
   deriver: ProductBlockDeriver::class,
 )]
 final class ProductTypeBlock extends BlockBase {
-  // $this->getDerivativeId() returns the product type ID.
+
+  public function build(): array {
+    // $this->getDerivativeId() returns the product type ID.
+    return [
+      '#markup' => $this->t('Products of type @type', ['@type' => $this->getDerivativeId()]),
+    ];
+  }
+
 }
 ```
 

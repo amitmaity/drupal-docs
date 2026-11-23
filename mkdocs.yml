@@ -12,6 +12,7 @@ theme:
     - navigation.top
     - navigation.indexes
     - search.suggest
+    - content.action.edit
     - content.code.copy
     - content.code.annotate
     - content.tabs.link

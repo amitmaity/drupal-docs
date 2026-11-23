@@ -23,7 +23,8 @@ graph TB
 | Anonymous users | Yes | Yes |
 | Authenticated users | No | Yes |
 | Per-user variations | N/A | Via placeholders |
-| Middleware priority | Lower | Higher |
+| Implementation | HTTP middleware (runs first, before routing) | Event subscriber on `KernelEvents::REQUEST`/`RESPONSE` |
+| Honors cache contexts / max-age | No (one entry per URL; expiry only via `Expires` header) | Yes |
 
 Both are enabled by default in Drupal 11:
 
@@ -52,7 +53,7 @@ sequenceDiagram
     DPC-->>User: Complete response
 ```
 
-Elements with `user` cache context become placeholders automatically, allowing the outer page to be cached while inner parts vary per user.
+Elements that have a `#lazy_builder` become placeholders automatically when their cacheability matches `renderer.config.auto_placeholder_conditions` (by default: `max-age` 0, or the `session` or `user` context). The outer page can then be cached while those parts vary per user. Elements without a `#lazy_builder` are never placeholdered; their contexts bubble up to the page instead.
 
 ## Cacheable responses
 
@@ -138,7 +139,7 @@ $build['#cache']['max-age'] = 0;
 Dynamic page cache creates separate entries per unique context combination:
 
 ```php
-// Two cache entries: one per role combination
+// Two cache entries: users with the authenticated role, and users without it
 $build['#cache']['contexts'] = ['user.roles:authenticated'];
 ```
 
@@ -223,9 +224,14 @@ Use [cache invalidation webhooks](../headless/cache-invalidation.md) for content
 ## Debugging
 
 ```php
-// settings.local.php — disable dynamic page cache
-$config['system.performance']['cache']['page']['max_age'] = 0;
+// settings.local.php — disable dynamic page cache (and internal page cache).
+// cache.backend.null is defined in sites/development.services.yml.
+$settings['container_yamls'][] = DRUPAL_ROOT . '/sites/development.services.yml';
+$settings['cache']['bins']['dynamic_page_cache'] = 'cache.backend.null';
+$settings['cache']['bins']['page'] = 'cache.backend.null';
 ```
+
+`system.performance:cache.page.max_age` only sets the `Cache-Control` max-age sent to browsers and proxies. It does not disable either Drupal cache.
 
 ```bash
 # Response headers

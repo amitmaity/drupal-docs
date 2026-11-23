@@ -10,7 +10,7 @@ drush en graphql graphql_compose -y
 drush cr
 ```
 
-GraphiQL explorer: `https://my-site.ddev.site/graphql/explorer`
+GraphiQL explorer (GraphQL 4.x, per server): `https://my-site.ddev.site/admin/config/graphql/servers/manage/{server}/explorer`
 
 ## Architecture
 

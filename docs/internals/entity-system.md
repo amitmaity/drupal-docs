@@ -33,7 +33,7 @@ graph TB
 
 ## Entity type definition
 
-Content entities use the `#[ContentEntityType]` attribute (Drupal 10.2+):
+Content entities use the `#[ContentEntityType]` attribute (Drupal 11.1+; earlier versions use the `@ContentEntityType` annotation):
 
 ```php
 <?php
@@ -64,6 +64,10 @@ use Drupal\my_module\Form\ProductForm;
       'add' => ProductForm::class,
       'edit' => ProductForm::class,
       'delete' => 'Drupal\Core\Entity\ContentEntityDeleteForm',
+    ],
+    // Turns the link templates below into routes.
+    'route_provider' => [
+      'html' => 'Drupal\Core\Entity\Routing\AdminHtmlRouteProvider',
     ],
     'views_data' => 'Drupal\views\EntityViewsData',
   ],
@@ -209,7 +213,7 @@ final class ProductRepository {
 
 ### Storage schema
 
-Content entities need an update hook for the base table:
+Entity tables are created automatically when the module is installed. If you add an entity type to a module that is already installed, install it from an update hook:
 
 ```php
 <?php
@@ -222,19 +226,16 @@ declare(strict_types=1);
  */
 
 /**
- * Implements hook_schema().
+ * Installs the product entity type.
  */
-function my_module_schema(): array {
-  // Base fields create columns automatically via entity updates.
-  // hook_schema is only needed for custom non-field tables.
-  return [];
+function my_module_update_11001(): void {
+  $entity_type = \Drupal::entityTypeManager()->getDefinition('product');
+  \Drupal::entityDefinitionUpdateManager()->installEntityType($entity_type);
 }
 ```
 
 ```bash
-# After adding a new entity type, run entity schema updates
-drush entup -y
-# Or full database update
+# Run pending update hooks (Drush has no automatic entity-updates command)
 drush updatedb -y
 ```
 

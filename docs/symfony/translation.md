@@ -50,7 +50,7 @@ $markup = new TranslatableMarkup('Product @name saved.', ['@name' => $product->l
 |-------------|----------|
 | `@key` | HTML-escaped |
 | `%key` | Escapes and wraps in `<em>` |
-| `:key` | Not escaped (use only for trusted HTML) |
+| `:key` | HTML-escaped and stripped of dangerous protocols (`javascript:`); for URL attribute values such as `href` |
 
 ```php
 <?php
@@ -60,8 +60,8 @@ declare(strict_types=1);
 // Safe — user input is escaped
 $this->t('Hello @name', ['@name' => $userInput]);
 
-// Dangerous — only for trusted markup
-$this->t('Visit :link', [':link' => '<a href="/admin">admin</a>']);
+// URLs only — escaped and stripped of dangerous protocols
+$this->t('Visit <a href=":url">the admin page</a>', [':url' => '/admin']);
 ```
 
 ### Interface translation
@@ -73,9 +73,9 @@ Custom module strings are extracted to `*.po` files:
 msgid "Product list"
 msgstr "Liste des produits"
 
-msgid "Imported @count products."
+msgid "Imported 1 product."
 msgid_plural "Imported @count products."
-msgstr[0] "Produit @count importé."
+msgstr[0] "1 produit importé."
 msgstr[1] "@count produits importés."
 ```
 
@@ -151,6 +151,7 @@ $this->formatPlural($deleted, 'Deleted 1 product.', 'Deleted @count products.', 
 
     namespace Drupal\my_module\Service;
 
+    use Drupal\Core\Language\LanguageManagerInterface;
     use Drupal\Core\StringTranslation\TranslatableMarkup;
     use Drupal\Core\StringTranslation\TranslationInterface;
 
@@ -158,6 +159,7 @@ $this->formatPlural($deleted, 'Deleted 1 product.', 'Deleted @count products.', 
 
       public function __construct(
         private readonly TranslationInterface $translation,
+        private readonly LanguageManagerInterface $languageManager,
       ) {}
 
       public function notFound(string $resource): TranslatableMarkup {
@@ -175,7 +177,7 @@ $this->formatPlural($deleted, 'Deleted 1 product.', 'Deleted @count products.', 
       public function toArray(TranslatableMarkup $message): array {
         return [
           'message' => (string) $message,
-          'langcode' => $this->translation->getDefaultLangcode(),
+          'langcode' => $this->languageManager->getCurrentLanguage()->getId(),
         ];
       }
 
@@ -224,7 +226,7 @@ $this->formatPlural($deleted, 'Deleted 1 product.', 'Deleted @count products.', 
     ```yaml
     my_module.api_messages:
       class: Drupal\my_module\Service\ApiMessageService
-      arguments: ['@string_translation']
+      arguments: ['@string_translation', '@language_manager']
     ```
 
 ## Custom .po file in module

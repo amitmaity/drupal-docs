@@ -57,21 +57,31 @@ Every HTTP request enters through `index.php`, which bootstraps the kernel:
 
 ```php
 <?php
-// web/index.php (simplified)
+// web/index.php (Drupal 11.0–11.3)
 use Drupal\Core\DrupalKernel;
 use Symfony\Component\HttpFoundation\Request;
 
 $autoloader = require_once 'autoload.php';
-$kernel = DrupalKernel::createFromRequest(
-  Request::createFromGlobals(),
-  $autoloader,
-  'prod'
-);
+$kernel = new DrupalKernel('prod', $autoloader);
 $request = Request::createFromGlobals();
 $response = $kernel->handle($request);
 $response->send();
 $kernel->terminate($request, $response);
 ```
+
+!!! note "Drupal 11.4+: Symfony Runtime"
+    From Drupal 11.4, `index.php` hands the request/response cycle to the Symfony Runtime component, which creates the `Request`, calls `handle()`, sends the response and calls `terminate()` for you:
+
+    ```php
+    <?php
+    use Drupal\Core\DrupalKernel;
+
+    require_once 'autoload_runtime.php';
+
+    return static function () {
+      return new DrupalKernel('prod', require 'autoload.php');
+    };
+    ```
 
 The kernel manages:
 

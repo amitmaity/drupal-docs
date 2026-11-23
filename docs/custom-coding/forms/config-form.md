@@ -214,13 +214,18 @@ final class SettingsReader {
 ## Export and deploy config
 
 ```bash
-# Export single config object
-ddev drush config:export --destination=/tmp/cfg
-cat /tmp/cfg/example_module.settings.yml
+# Inspect a single config object
+ddev drush config:get example_module.settings
+
+# Export all active config to the sync directory
+ddev drush config:export -y
 
 # Import on another environment
 ddev drush config:import -y
 ```
+
+!!! tip "Constructor and `#config_target`"
+    Since Drupal 10.2, `ConfigFormBase::__construct()` takes `ConfigFactoryInterface` **and** `TypedConfigManagerInterface` — pass both if you override the constructor. Elements can also declare `'#config_target' => 'example_module.settings:default_greeting'` to load and save the value without a custom `submitForm()`.
 
 !!! note "Config overrides"
     Settings in `settings.php` via `$config['example_module.settings']['max_items'] = 5;` override the database but are not exported. Use for environment-specific values only.

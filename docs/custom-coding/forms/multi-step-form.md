@@ -86,7 +86,7 @@ final class WizardForm extends FormBase {
     $form['email'] = [
       '#type' => 'email',
       '#title' => $this->t('Email'),
-      '#default_value' => $form_state->get('email', ''),
+      '#default_value' => $form_state->get('email') ?? '',
       '#required' => TRUE,
     ];
 
@@ -112,21 +112,21 @@ final class WizardForm extends FormBase {
     $form['first_name'] = [
       '#type' => 'textfield',
       '#title' => $this->t('First name'),
-      '#default_value' => $form_state->get('first_name', ''),
+      '#default_value' => $form_state->get('first_name') ?? '',
       '#required' => TRUE,
     ];
 
     $form['last_name'] = [
       '#type' => 'textfield',
       '#title' => $this->t('Last name'),
-      '#default_value' => $form_state->get('last_name', ''),
+      '#default_value' => $form_state->get('last_name') ?? '',
       '#required' => TRUE,
     ];
 
     $form['bio'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Bio'),
-      '#default_value' => $form_state->get('bio', ''),
+      '#default_value' => $form_state->get('bio') ?? '',
     ];
 
     $form['actions']['back'] = [
@@ -228,7 +228,9 @@ final class WizardForm extends FormBase {
    * Returns the current wizard step.
    */
   private function getStep(FormStateInterface $form_state): int {
-    return (int) $form_state->get('step', self::STEP_ACCOUNT);
+    // FormStateInterface::get() takes no default argument; it returns NULL
+    // for unset keys.
+    return (int) ($form_state->get('step') ?? self::STEP_ACCOUNT);
   }
 
   /**

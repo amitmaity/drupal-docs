@@ -6,8 +6,8 @@ Replace default SQL storage with a custom backend — remote APIs, key-value sto
 
 | Scenario | Approach |
 |----------|----------|
-| Data lives in external API | Custom `ContentEntityStorage` |
-| Read-heavy, cache-first | Decorator around default storage |
+| Data lives in external API | Subclass `ContentEntityNullStorage` |
+| Extra behavior on core storage | Subclass core storage + `hook_entity_type_alter()` |
 | Non-SQL backend | Full custom storage class |
 | Sync from remote on read | `load()` override with API fetch |
 
@@ -91,7 +91,7 @@ declare(strict_types=1);
 
 namespace Drupal\example_module\Storage;
 
-use Drupal\Core\Entity\ContentEntityStorageBase;
+use Drupal\Core\Entity\ContentEntityNullStorage;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\example_module\RemoteApiClient;
@@ -99,24 +99,24 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
  * Storage handler that reads/writes via a remote API.
+ *
+ * ContentEntityNullStorage implements every abstract method of
+ * ContentEntityStorageBase (doLoadMultiple(), doSave(), has(), field item
+ * storage, etc.) as a no-op, so only the public CRUD methods are overridden.
  */
-final class RemoteItemStorage extends ContentEntityStorageBase {
+final class RemoteItemStorage extends ContentEntityNullStorage {
 
-  public function __construct(
-    EntityTypeInterface $entity_type,
-    private readonly RemoteApiClient $apiClient,
-  ) {
-    parent::__construct($entity_type);
-  }
+  private RemoteApiClient $apiClient;
 
   /**
    * {@inheritdoc}
    */
   public static function createInstance(ContainerInterface $container, EntityTypeInterface $entity_type): static {
-    return new static(
-      $entity_type,
-      $container->get('example_module.remote_api_client'),
-    );
+    // The parent passes the entity field manager, caches and bundle info
+    // that ContentEntityStorageBase::__construct() requires.
+    $instance = parent::createInstance($container, $entity_type);
+    $instance->apiClient = $container->get('example_module.remote_api_client');
+    return $instance;
   }
 
   /**
@@ -267,9 +267,9 @@ final class RemoteApiClient {
 
 ---
 
-## Storage decorator (cache layer)
+## Extend an existing storage handler
 
-Wrap default storage without replacing it entirely:
+Storage handlers are not container services, so they cannot be wrapped with `decorates:` in `services.yml`. To add behavior to core storage, subclass it and swap the class in `hook_entity_type_alter()`:
 
 ```php
 <?php
@@ -278,99 +278,72 @@ declare(strict_types=1);
 
 namespace Drupal\example_module\Storage;
 
-use Drupal\Core\Cache\CacheBackendInterface;
 use Drupal\Core\Entity\EntityInterface;
-use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\node\NodeStorage;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
- * Caches entity load results.
+ * Node storage that logs every save.
  */
-final class CachedNodeStorage implements EntityStorageInterface {
+final class LoggingNodeStorage extends NodeStorage {
 
-  public function __construct(
-    private readonly EntityStorageInterface $inner,
-    private readonly CacheBackendInterface $cache,
-  ) {}
+  private LoggerInterface $logger;
 
-  public function load($id): ?EntityInterface {
-    $cid = 'example_node:' . $id;
-    if ($cache = $this->cache->get($cid)) {
-      return $cache->data;
-    }
-
-    $entity = $this->inner->load($id);
-    if ($entity !== NULL) {
-      $this->cache->set($cid, $entity, CacheBackendInterface::CACHE_PERMANENT, $entity->getCacheTags());
-    }
-    return $entity;
+  /**
+   * {@inheritdoc}
+   */
+  public static function createInstance(ContainerInterface $container, EntityTypeInterface $entity_type): static {
+    $instance = parent::createInstance($container, $entity_type);
+    $instance->logger = $container->get('logger.factory')->get('example_module');
+    return $instance;
   }
 
-  // Delegate all other EntityStorageInterface methods to $this->inner...
-  public function loadMultiple(?array $ids = NULL): array {
-    return $this->inner->loadMultiple($ids);
-  }
-
-  public function loadByProperties(array $values = []): array {
-    return $this->inner->loadByProperties($values);
-  }
-
-  public function loadUnchanged($id): ?EntityInterface {
-    return $this->inner->loadUnchanged($id);
-  }
-
-  public function create(array $values = []): EntityInterface {
-    return $this->inner->create($values);
-  }
-
-  public function save(EntityInterface $entity) {
-    return $this->inner->save($entity);
-  }
-
-  public function delete(array $entities) {
-    $this->inner->delete($entities);
-  }
-
-  public function restore(EntityInterface $entity) {
-    return $this->inner->restore($entity);
-  }
-
-  public function resetCache(?array $ids = NULL) {
-    $this->inner->resetCache($ids);
-  }
-
-  public function getQuery($conjunction = 'AND') {
-    return $this->inner->getQuery($conjunction);
-  }
-
-  public function getAggregateQuery($conjunction = 'AND') {
-    return $this->inner->getAggregateQuery($conjunction);
-  }
-
-  public function getEntityTypeId(): string {
-    return $this->inner->getEntityTypeId();
-  }
-
-  public function hasData(): bool {
-    return $this->inner->hasData();
+  /**
+   * {@inheritdoc}
+   */
+  protected function doPostSave(EntityInterface $entity, $update) {
+    parent::doPostSave($entity, $update);
+    $this->logger->info('Saved node @id.', ['@id' => $entity->id()]);
   }
 
 }
 ```
 
-```yaml
-# example_module.services.yml — decorate core node storage
-  example_module.cached_node_storage:
-    class: Drupal\example_module\Storage\CachedNodeStorage
-    decorates: entity_type.manager
-    decoration_inner_name: example_module.cached_node_storage.inner
-    arguments:
-      - '@example_module.cached_node_storage.inner'
-      - '@cache.default'
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\example_module\Hook;
+
+use Drupal\Core\Hook\Attribute\Hook;
+use Drupal\example_module\Storage\LoggingNodeStorage;
+
+/**
+ * Entity type alterations.
+ */
+final class EntityTypeHooks {
+
+  /**
+   * Implements hook_entity_type_alter().
+   *
+   * @param array<string, \Drupal\Core\Entity\EntityTypeInterface> $entity_types
+   */
+  #[Hook('entity_type_alter')]
+  public function entityTypeAlter(array &$entity_types): void {
+    $entity_types['node']->setStorageClass(LoggingNodeStorage::class);
+  }
+
+}
 ```
 
+!!! note "Load caching is built in"
+    Content entities already use the persistent entity cache (`cache.entity`) and a static memory cache, so a separate cache layer around `load()` is rarely needed. Only one module can own an entity type's storage class — check for conflicts with contrib modules that alter the same entity type.
+
 !!! tip "Entity query limitations"
-    Custom storage may not support `getQuery()`. Throw `UnsupportedEntityStorageException` or implement a custom query class if filtering is required.
+    `ContentEntityNullStorage` uses the `entity.query.null` service, whose queries always return no results. Override `getQueryServiceName()` with a custom entity query service if filtering is required.
 
 !!! note "Static cache"
     Call `$storage->resetCache([$id])` after external updates so `load()` does not return stale entities.

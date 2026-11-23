@@ -1,6 +1,6 @@
 # Forms API
 
-Drupal's Form API builds, validates, and submits HTML forms with CSRF protection, multistep state, and AJAX support. Forms are classes extending `FormBase` or `ConfigFormBase`, wired through routes or `hook_form()`.
+Drupal's Form API builds, validates, and submits HTML forms with CSRF protection, multistep state, and AJAX support. Forms are classes extending `FormBase` or `ConfigFormBase`, wired through a route's `_form` default, rendered with `\Drupal::formBuilder()->getForm()`, or registered as entity form handlers.
 
 ## Form types in this section
 

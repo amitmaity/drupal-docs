@@ -76,9 +76,12 @@ final class ProductListController extends ControllerBase {
   public function __construct(
     EntityTypeManagerInterface $entityTypeManager,
     private readonly LoggerInterface $logger,
-    private readonly ConfigFactoryInterface $configFactory,
+    ConfigFactoryInterface $configFactory,
   ) {
+    // ControllerBase already declares protected $entityTypeManager and
+    // $configFactory; redeclaring them as private readonly is a fatal error.
     $this->entityTypeManager = $entityTypeManager;
+    $this->configFactory = $configFactory;
   }
 
   public static function create(ContainerInterface $container): static {

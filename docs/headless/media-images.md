@@ -114,38 +114,39 @@ drush config:import -y
 Drupal image style URLs follow this pattern:
 
 ```
-/sites/default/files/styles/{style_name}/public/{file_path}
+/sites/default/files/styles/{style_name}/public/{file_path}?itok={token}
 ```
 
 Example:
 
 ```
-https://my-site.ddev.site/sites/default/files/styles/hero/public/2026-01/hero.jpg
+https://my-site.ddev.site/sites/default/files/styles/hero/public/2026-01/hero.jpg?itok=Ab12Cd34
 ```
+
+!!! warning "Don't build style URLs in the frontend"
+    The `itok` token is an HMAC that only Drupal can compute. A derivative that has not been generated yet is only created when the request carries a valid `itok`; without it Drupal returns `404`. (Setting `image.settings:allow_insecure_derivatives` relaxes this, but it re-opens the denial-of-service hole the token closes.) Get finished style URLs from Drupal instead:
+
+    - **[Consumer Image Styles](https://www.drupal.org/project/consumer_image_styles)** (contrib) adds signed derivative URLs (`meta.imageDerivatives`) to image data in JSON:API responses, for the styles enabled on the consumer.
+    - **`ImageStyle::buildUrl()`** in your own code returns the absolute URL including `itok` (see `ResponsiveImageBuilder` below).
 
 ### Helper function
 
 ```typescript
 // lib/drupal-image.ts
-const DRUPAL_BASE = process.env.NEXT_PUBLIC_DRUPAL_BASE_URL!;
 
-export function imageStyleUrl(
-  fileUrl: string,
-  styleName: string,
-): string {
-  // fileUrl: /sites/default/files/2026-01/hero.jpg
-  const path = fileUrl.replace('/sites/default/files/', '');
-  return `${DRUPAL_BASE}/sites/default/files/styles/${styleName}/public/${path}`;
+// One image style URL as delivered by Drupal (absolute, already signed with itok).
+export interface DrupalImageSource {
+  url: string;
+  width: number;
 }
 
-export function responsiveImageUrls(fileUrl: string) {
-  return {
-    thumbnail: imageStyleUrl(fileUrl, 'thumbnail'),
-    medium: imageStyleUrl(fileUrl, 'medium'),
-    large: imageStyleUrl(fileUrl, 'large'),
-    hero: imageStyleUrl(fileUrl, 'hero'),
-    original: `${DRUPAL_BASE}${fileUrl}`,
-  };
+// Pick the smallest delivered style at least `minWidth` wide.
+export function pickImageSource(
+  sources: DrupalImageSource[],
+  minWidth: number,
+): DrupalImageSource | undefined {
+  const sorted = [...sources].sort((a, b) => a.width - b.width);
+  return sorted.find((source) => source.width >= minWidth) ?? sorted.at(-1);
 }
 ```
 
@@ -184,7 +185,7 @@ fallback_image_style: large
 
 ### Expose responsive data via custom normalizer
 
-JSON:API does not natively expose responsive image `srcset`. Add a computed field:
+JSON:API does not natively expose responsive image `srcset`. Build the data with a service like this, then expose it through a computed field (see [Adding data to JSON:API output](custom-json-apis.md#adding-data-to-jsonapi-output)) or a custom endpoint:
 
 ```php
 <?php
@@ -255,23 +256,21 @@ final class ResponsiveImageBuilder {
 ```tsx
 // components/ArticleHero.tsx
 import Image from 'next/image';
-import { imageStyleUrl } from '@/lib/drupal-image';
 
 interface ArticleHeroProps {
-  fileUrl: string;
+  // The `hero` style URL as delivered by Drupal (includes ?itok=...).
+  heroUrl: string;
   alt: string;
   width?: number;
   height?: number;
 }
 
 export function ArticleHero({
-  fileUrl,
+  heroUrl,
   alt,
   width = 1200,
   height = 630,
 }: ArticleHeroProps) {
-  const heroUrl = imageStyleUrl(fileUrl, 'hero');
-
   return (
     <Image
       src={heroUrl}
@@ -285,6 +284,9 @@ export function ArticleHero({
   );
 }
 ```
+
+!!! note "Next.js 16"
+    `priority` is deprecated in Next.js 16; use `preload` (or `loading="eager"`). Next.js 16 also refuses to optimize images from hosts that resolve to local IPs (e.g. DDEV), see [Drupal + Next.js](nextjs.md).
 
 ### Native srcset without next/image
 

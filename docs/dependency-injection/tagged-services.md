@@ -28,11 +28,11 @@ At compile time, `RegisterEventSubscribersPass` finds all `event_subscriber` tag
 |-----|-----------|---------|
 | `event_subscriber` | `event_dispatcher` | Symfony event listeners |
 | `access_check` | `access_manager` | Route access checkers |
-| `http_middleware` | `http_middleware` | Request/response middleware |
+| `http_middleware` | `http_kernel` (`StackedKernelPass`) | Request/response middleware |
 | `paramconverter` | `paramconverter_manager` | Route parameter upcasting |
 | `cache_context` | `cache_contexts_manager` | Cache context plugins |
 | `logger` | `logger.factory` | PSR-3 loggers |
-| `drush.command` | Drush command discovery | CLI commands |
+| `drush.command` | Drush (legacy `drush.services.yml`) | CLI commands — deprecated since Drush 12 |
 | `service_collector` | Custom collectors | Generic tag aggregation |
 
 ## Event subscribers
@@ -285,12 +285,11 @@ services:
 | `priority` | Most collectors | Higher runs first |
 | `applies_to` | `access_check` | Requirement key name |
 | `context_id` | `cache_context` | Cache context ID string |
-| `responder` | `http_middleware` | Also run on response path |
 | `provider` | Various | Provider grouping |
 
 ## Compiler passes in core
 
-Drupal registers these passes in `DrupalKernel`:
+Drupal registers these passes in `CoreServiceProvider::register()`:
 
 ```mermaid
 graph TB
@@ -304,7 +303,7 @@ graph TB
     P3 --> COL[Various collectors]
 ```
 
-Custom modules rarely register compiler passes. Use existing tags or `hook_module_implements_alter`-style service providers instead.
+Custom modules rarely register compiler passes. Use existing tags, or a service provider's `alter()` method, instead.
 
 ## Custom compiler pass (advanced)
 
@@ -315,9 +314,10 @@ When tags are insufficient, register a compiler pass:
 
 declare(strict_types=1);
 
-namespace Drupal\my_module\DependencyInjection;
+// Must live at Drupal\{module}\{CamelCasedModule}ServiceProvider
+// (src/MyModuleServiceProvider.php) — Drupal finds it by name only.
+namespace Drupal\my_module;
 
-use Drupal\my_module\MyModuleCompilerPass;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ServiceProviderInterface;
 
@@ -360,7 +360,7 @@ final class MyModuleCompilerPass implements CompilerPassInterface {
 ## Inspecting tagged services
 
 ```bash
-# List event subscribers (via devel)
+# List my_module service IDs
 drush php:eval "
 \$container = \Drupal::getContainer();
 \$ids = \$container->getServiceIds();
@@ -381,30 +381,27 @@ echo count(\$listeners) . ' kernel.response listeners' . PHP_EOL;
 
 ## Drush command tags
 
-```yaml
-# drush.services.yml (module root)
-services:
-  my_module.commands:
-    class: Drupal\my_module\Commands\ProductCommands
-    arguments: ['@my_module.product_manager']
-    tags:
-      - { name: drush.command }
-```
+Drush 12+ no longer needs the `drush.command` tag or a `drush.services.yml` file (deprecated). Put the class in `src/Drush/Commands/` and let `AutowireTrait` inject services; `#[Autowire]` picks a service by ID when the type hint is not enough:
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace Drupal\my_module\Commands;
+namespace Drupal\my_module\Drush\Commands;
 
 use Drupal\my_module\Service\ProductManager;
 use Drush\Attributes as CLI;
+use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 final class ProductCommands extends DrushCommands {
 
+  use AutowireTrait;
+
   public function __construct(
+    #[Autowire(service: 'my_module.product_manager')]
     private readonly ProductManager $productManager,
   ) {
     parent::__construct();
@@ -422,6 +419,8 @@ final class ProductCommands extends DrushCommands {
 ```bash
 drush my-module:product-count
 ```
+
+Drush 13.7+ also deprecates attribute-based `DrushCommands` classes in favour of Symfony Console commands; see the [Drush command authoring docs](https://www.drush.org/latest/commands/).
 
 ## Related reading
 

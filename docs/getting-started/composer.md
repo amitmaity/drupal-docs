@@ -45,7 +45,7 @@ $decoded = JWT::decode($token, new Key($secret, 'HS256'));
 composer update
 
 # Update only Drupal core
-composer update drupal/core-recommended --with-dependencies
+composer update "drupal/core-*" --with-all-dependencies
 
 # Update a single module
 composer update drupal/admin_toolbar
@@ -75,13 +75,14 @@ composer require cweagans/composer-patches
   "extra": {
     "patches": {
       "drupal/core": {
-        "Fix JSON:API filter: https://drupal.org/node/12345": "https://git.drupalcode.org/project/drupal/-/merge_requests/12345.diff"
+        "Fix JSON:API filter: https://drupal.org/node/12345": "patches/core-jsonapi-filter-12345.patch"
       }
-    },
-    "enable-patching": true
+    }
   }
 }
 ```
+
+Download merge request diffs into `patches/` and commit them: a live `merge_requests/….diff` URL changes whenever the MR is updated.
 
 ```bash
 # Re-apply patches after update
@@ -165,10 +166,6 @@ Add custom scripts to `composer.json`:
 ```json
 {
   "scripts": {
-    "post-update-cmd": [
-      "Drupal\\Core\\Composer\\Composer::generateMetapackages",
-      "@drupal:scaffold"
-    ],
     "drupal:cr": "drush cr",
     "drupal:cex": "drush config:export -y",
     "drupal:cim": "drush config:import -y",
@@ -191,6 +188,6 @@ composer audit
 # Drupal-specific security check
 drush pm:security
 
-# Update only security releases
-composer update --with-all-dependencies --prefer-stable
+# Update only the packages flagged above
+composer update drupal/module_name --with-all-dependencies
 ```

@@ -23,7 +23,6 @@ web/modules/custom/example_module/
 │   └── example-module.admin.css
 ├── templates/
 │   └── example-module-greeting.html.twig
-├── drush.services.yml
 ├── src/
 │   ├── Controller/
 │   │   └── GreetingController.php
@@ -38,8 +37,9 @@ web/modules/custom/example_module/
 │   │   └── GreetingAccessCheck.php
 │   ├── Service/
 │   │   └── GreetingGenerator.php
-│   └── Commands/
-│       └── ExampleCommands.php
+│   └── Drush/
+│       └── Commands/
+│           └── ExampleCommands.php
 └── tests/
     └── src/
         ├── Unit/
@@ -137,6 +137,10 @@ services:
     arguments:
       - '@config.factory'
       - '@string_translation'
+
+  # Class alias so autowired classes (OOP hooks, Drush commands) can
+  # type-hint GreetingGenerator.
+  Drupal\example_module\Service\GreetingGenerator: '@example_module.greeting_generator'
 
   example_module.greeting_access_check:
     class: Drupal\example_module\Access\GreetingAccessCheck
@@ -443,7 +447,7 @@ namespace Drupal\example_module\Plugin\Block;
 
 use Drupal\Core\Block\Attribute\Block;
 use Drupal\Core\Block\BlockBase;
-use Drupal\Core\Plugin\Context\ContextDefinition;
+use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\example_module\Service\GreetingGenerator;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -456,7 +460,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
   admin_label: new TranslatableMarkup('Example greeting'),
   category: new TranslatableMarkup('Custom'),
 )]
-final class GreetingBlock extends BlockBase {
+final class GreetingBlock extends BlockBase implements ContainerFactoryPluginInterface {
 
   public function __construct(
     array $configuration,

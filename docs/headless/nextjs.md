@@ -61,6 +61,9 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
+!!! note "Next.js 16"
+    Next.js 16 blocks `next/image` optimization of images whose host resolves to a local/private IP. DDEV hostnames such as `my-site.ddev.site` resolve to `127.0.0.1`, so local images return `400` until you set `images.dangerouslyAllowLocalIP: true`. Enable it in development only; it re-opens an SSRF vector.
+
 ## Drupal client
 
 ```typescript
@@ -107,9 +110,8 @@ export interface ArticleNode extends DrupalNode {
       };
     };
   };
-  path: {
-    alias: string;
-  };
+  // `path` (alias, pid, langcode) and `drupal_internal__nid` come from DrupalNode.
+  // At runtime `path.alias` is null for nodes without an alias.
 }
 ```
 
@@ -144,19 +146,22 @@ export default async function ArticlesPage() {
     <main className="mx-auto max-w-4xl p-8">
       <h1 className="text-3xl font-bold mb-8">Articles</h1>
       <ul className="space-y-6">
-        {articles.map((article) => (
-          <li key={article.id} className="border-b pb-4">
-            <Link
-              href={article.path.alias}
-              className="text-xl font-semibold hover:underline"
-            >
-              {article.title}
-            </Link>
-            {article.field_summary && (
-              <p className="text-gray-600 mt-2">{article.field_summary}</p>
-            )}
-          </li>
-        ))}
+        {/* Only aliased articles under /articles/ are served by app/articles/[...slug] */}
+        {articles
+          .filter((article) => article.path?.alias?.startsWith('/articles/'))
+          .map((article) => (
+            <li key={article.id} className="border-b pb-4">
+              <Link
+                href={article.path.alias}
+                className="text-xl font-semibold hover:underline"
+              >
+                {article.title}
+              </Link>
+              {article.field_summary && (
+                <p className="text-gray-600 mt-2">{article.field_summary}</p>
+              )}
+            </li>
+          ))}
       </ul>
     </main>
   );
@@ -177,35 +182,68 @@ interface PageProps {
   params: Promise<{ slug: string[] }>;
 }
 
-export async function generateStaticParams() {
-  const articles = await drupal.getResourceCollection<ArticleNode[]>(
-    'node--article',
-    {
-      params: {
-        'filter[status]': '1',
-        'fields[node--article]': 'path',
-        'page[limit]': '100',
-      },
-    },
-  );
+// Assumes the Pathauto pattern for articles is /articles/[node:title], so the
+// Next.js URL /articles/foo and the Drupal alias /articles/foo are identical.
+const ARTICLE_PREFIX = '/articles/';
+const PAGE_SIZE = 50; // JSON:API caps page[limit] at 50
 
-  return articles.map((article) => ({
-    slug: article.path.alias.split('/').filter(Boolean),
-  }));
+export async function generateStaticParams() {
+  const params: { slug: string[] }[] = [];
+
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const articles = await drupal.getResourceCollection<ArticleNode[]>(
+      'node--article',
+      {
+        params: {
+          'filter[status]': '1',
+          'fields[node--article]': 'path',
+          'sort': 'drupal_internal__nid',
+          'page[limit]': String(PAGE_SIZE),
+          'page[offset]': String(offset),
+        },
+      },
+    );
+
+    for (const article of articles) {
+      const alias = article.path?.alias;
+      // Skip nodes without an alias or outside /articles/: this route can't serve them.
+      if (alias?.startsWith(ARTICLE_PREFIX)) {
+        params.push({ slug: alias.slice(ARTICLE_PREFIX.length).split('/') });
+      }
+    }
+
+    if (articles.length < PAGE_SIZE) break;
+  }
+
+  return params;
 }
 
 async function getArticle(slug: string[]): Promise<ArticleNode | null> {
-  const path = `/${slug.join('/')}`;
+  // The [...slug] segment excludes /articles/, so add it back to get the alias.
+  const path = `${ARTICLE_PREFIX}${slug.join('/')}`;
 
   try {
-    return await drupal.getResourceByPath<ArticleNode>(path, {
-      params: {
-        include: 'field_author,field_hero_media.field_media_image,field_tags',
-      },
-      next: {
-        tags: [`node:article`],
-      },
+    // Resolve the alias first so the fetch can carry the node's own cache tag
+    // (node:{nid}), which is the tag Drupal invalidates when the node is saved.
+    const translated = await drupal.translatePath(path, {
+      next: { revalidate: 3600 },
     });
+    if (!translated?.entity || translated.entity.bundle !== 'article') {
+      return null;
+    }
+
+    return await drupal.getResource<ArticleNode>(
+      'node--article',
+      translated.entity.uuid,
+      {
+        params: {
+          include: 'field_author,field_hero_media.field_media_image,field_tags',
+        },
+        next: {
+          tags: [`node:${translated.entity.id}`],
+        },
+      },
+    );
   } catch {
     return null;
   }
@@ -264,6 +302,11 @@ export default async function ArticlePage({ params }: PageProps) {
 }
 ```
 
+`translatePath()` uses Drupal's `decoupled_router` module (also required by `getResourceByPath()`).
+
+!!! note "Next.js 16"
+    The `priority` prop of `next/image` is deprecated in Next.js 16. Use `preload` (or `loading="eager"`) instead.
+
 ## ISR with on-demand revalidation
 
 ### Next.js revalidation route handler
@@ -307,22 +350,21 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-## Client component with preview
+!!! note "Next.js 16"
+    Single-argument `revalidateTag(tag)` is deprecated in Next.js 16 (a TypeScript error). Pass a `cacheLife` profile as the second argument, e.g. `revalidateTag(tag, 'max')`, for stale-while-revalidate behaviour.
+
+## Draft mode indicator and preview
+
+The draft-mode cookie (`__prerender_bypass`) is `HttpOnly`, so client code cannot see it through `document.cookie`. Read the state on the server with `draftMode()` instead:
 
 ```tsx
-// src/components/DraftModeIndicator.tsx
-'use client';
+// src/components/DraftModeIndicator.tsx (Server Component)
+import { draftMode } from 'next/headers';
 
-import { useEffect, useState } from 'react';
+export async function DraftModeIndicator() {
+  const { isEnabled } = await draftMode();
 
-export function DraftModeIndicator() {
-  const [isDraft, setIsDraft] = useState(false);
-
-  useEffect(() => {
-    setIsDraft(document.cookie.includes('__prerender_bypass'));
-  }, []);
-
-  if (!isDraft) return null;
+  if (!isEnabled) return null;
 
   return (
     <div className="fixed bottom-4 right-4 bg-yellow-400 text-black px-4 py-2 rounded shadow">
@@ -412,12 +454,10 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Fetch global menu or site settings at layout level
-  const menu = await drupal.getResourceCollection('menu_link_content--menu_link_content', {
-    params: {
-      'filter[menu_name]': 'main',
-      'sort': 'weight',
-    },
+  // Fetch the main menu at layout level. getMenu() needs the contrib
+  // JSON:API Menu Items module (jsonapi_menu_items) on Drupal: plain JSON:API
+  // menu_link_content resources require the 'administer menu' permission to view.
+  const { tree } = await drupal.getMenu('main', {
     next: { tags: ['config:system.menu.main'], revalidate: 86400 },
   });
 
@@ -426,11 +466,9 @@ export default async function RootLayout({
       <body>
         <nav className="border-b p-4">
           <ul className="flex gap-6">
-            {menu.map((item: { title: string; link: { uri: string } }) => (
-              <li key={item.title}>
-                <a href={item.link.uri.replace('internal:', '')}>
-                  {item.title}
-                </a>
+            {tree.map((item) => (
+              <li key={item.id}>
+                <a href={item.url}>{item.title}</a>
               </li>
             ))}
           </ul>

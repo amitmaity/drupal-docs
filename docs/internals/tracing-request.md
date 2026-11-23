@@ -66,9 +66,9 @@ sequenceDiagram
     C->>IP: GET /api/products/42
     IP->>DK: createFromRequest + handle()
     DK->>DK: bootstrap FULL
-    DK->>HK: handle(request)
-    HK->>MW: REQUEST event + middleware
-    MW->>RT: match path
+    DK->>MW: middleware stack
+    MW->>HK: handle(request)
+    HK->>RT: REQUEST event: match path
     RT-->>HK: my_module.api_product
     HK->>PC: upcast product=42
     PC->>EN: load product entity
@@ -111,22 +111,22 @@ curl -v "https://my-site.ddev.site/api/products/42" \
 drush php:eval "echo 'Container has ' . count(\Drupal::getContainer()->getServiceIds()) . ' services';"
 ```
 
-### Step 3: KernelEvents::REQUEST
+### Step 3: Middleware stack
 
-Event subscribers run — language negotiation, maintenance mode check, IP blocking, etc. Our API path passes through.
+Middleware runs before any kernel event, outermost first: content negotiation reads the `Accept` header, page cache serves a cached copy to anonymous users or passes through, `KernelPreHandle` loads all modules, and session middleware starts the session.
+
+### Step 4: KernelEvents::REQUEST
+
+Event subscribers run — language negotiation, maintenance mode check, IP blocking, etc. Routing itself happens here too (`RouterListener`, priority 32). Our API path passes through.
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-// At this point in the stack, $request attributes are still empty.
+// Before RouterListener runs, $request attributes are still empty.
 // $request->getPathInfo() === '/api/products/42'
 ```
-
-### Step 4: Middleware stack
-
-Session middleware attaches the session. Page cache middleware sees an authenticated or uncacheable request and passes through. Content negotiation middleware reads the `Accept` header.
 
 ### Step 5: Route matching
 
@@ -134,10 +134,10 @@ The router looks up `/api/products/42` against the route collection:
 
 ```bash
 # Confirm route exists and see its definition
-drush route:get my_module.api_product
+drush route --name=my_module.api_product
 
 # Match by path
-drush route --name=my_module.api_product
+drush route --path=/api/products/42
 ```
 
 Internally:
@@ -149,13 +149,15 @@ declare(strict_types=1);
 
 $router = \Drupal::service('router.no_access_checks');
 $parameters = $router->match('/api/products/42');
-// Returns:
+// Returns (abridged):
 // [
 //   '_controller' => '\Drupal\my_module\Controller\ProductApiController::get',
 //   '_route' => 'my_module.api_product',
-//   'product' => '42',  // Raw string — not yet upcast
-//   '_permission' => 'access content',
+//   '_route_object' => Route,
+//   'product' => Product,  // Already upcast: match() runs route enhancers
+//   '_raw_variables' => ParameterBag(['product' => '42']),
 // ]
+// Requirements such as _permission stay on the Route object.
 ```
 
 ### Step 6: Parameter upcasting
@@ -197,8 +199,8 @@ The `_permission: access content` requirement runs:
 declare(strict_types=1);
 
 $access_manager = \Drupal::service('access_manager');
-$result = $access_manager->checkNamedRoute('my_module.api_product', ['product' => $product], \Drupal::currentUser());
-// AccessResult::allowed() or forbidden
+$result = $access_manager->checkNamedRoute('my_module.api_product', ['product' => $product], \Drupal::currentUser(), TRUE);
+// AccessResultInterface (allowed, neutral or forbidden); without TRUE you get a bool.
 ```
 
 Anonymous users with `access content` permission pass. Without it → 403.
@@ -332,9 +334,9 @@ services:
 
 ```bash
 # Watch the trace in logs
-drush ws --filter=my_module --count=10
+drush ws --type=my_module --count=10
 curl -s "https://my-site.ddev.site/api/products/42" > /dev/null
-drush ws --filter=my_module --count=5
+drush ws --type=my_module --count=5
 ```
 
 ## Trace with Xdebug
@@ -366,7 +368,7 @@ curl -s -H "Accept: application/vnd.api+json" \
 
 | Step | Custom API | JSON:API |
 |------|------------|----------|
-| Route | `my_module.api_product` | `jsonapi.entity` |
+| Route | `my_module.api_product` | `jsonapi.node--article.individual` |
 | Controller | Your controller | `EntityResource` |
 | Response | Manual `JsonResponse` | Serializer normalizers |
 | Access | `_permission` | Entity + field access |

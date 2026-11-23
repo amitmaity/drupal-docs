@@ -26,7 +26,7 @@ my_module.product_list:
 |-----|---------|
 | `path` | URL pattern with `{placeholders}` |
 | `defaults._controller` | Callable (class::method or service:method) |
-| `defaults._form` | Form class for entity forms |
+| `defaults._form` | Form class (any `FormInterface` implementation) |
 | `defaults._entity_form` | Generic entity form route |
 | `defaults._title` | Page title (string or `_title_callback`) |
 | `requirements` | Access checks (`_permission`, `_role`, `_custom_access`) |
@@ -35,26 +35,30 @@ my_module.product_list:
 
 ## Route providers
 
-Routes are collected from multiple **route providers**, each implementing `RouteProviderInterface`:
+The route builder (`router.builder`) collects routes from several sources, dumps them into the `router` database table, and the single `RouteProvider` (`router.route_provider`, implementing `RouteProviderInterface`) reads them back:
 
 ```mermaid
 graph TB
-    subgraph providers [Route Providers]
-        YML[YamlRouteProvider]
-        RC[RouteCallbacks]
-        EN[EntityRouteProvider]
-        VW[Views Route Builder]
+    subgraph providers [Route Sources]
+        YML["*.routing.yml"]
+        RC[route_callbacks]
+        EN[Entity route_provider handlers]
+        VW[Route subscribers e.g. Views]
     end
 
-    subgraph storage [Route Collection]
+    subgraph storage [Route Storage]
+        RB[router.builder]
+        TBL[(router table)]
         RP[RouteProvider]
-        CACHE[cache.data: route]
+        CACHE[cache.data: path lookups]
     end
 
-    YML --> RP
-    RC --> RP
-    EN --> RP
-    VW --> RP
+    YML --> RB
+    RC --> RB
+    EN --> RB
+    VW --> RB
+    RB --> TBL
+    TBL --> RP
     RP --> CACHE
 ```
 
@@ -70,14 +74,13 @@ my_module.api_search:
     _controller: '\Drupal\my_module\Controller\SearchApiController::search'
   requirements:
     _permission: 'access content'
-  methods: [GET]
-  options:
     _format: 'json'
+  methods: [GET]
 ```
 
 ### Route callbacks (dynamic routes)
 
-Modules implement `hook_route_callbacks()` or OOP equivalent to return route collections:
+List callables under the `route_callbacks` key of `*.routing.yml`; each returns a `RouteCollection` (or an array of routes):
 
 ```php
 <?php
@@ -127,6 +130,14 @@ final class ProductRoutes implements ContainerInjectionInterface {
 ```
 
 ```yaml
+# my_module.routing.yml
+route_callbacks:
+  - '\Drupal\my_module\Routing\ProductRoutes::routes'
+```
+
+To alter routes after they are collected, extend `RouteSubscriberBase` and register it as an event subscriber:
+
+```yaml
 # my_module.services.yml
 parameters:
   my_module.product_types:
@@ -154,7 +165,11 @@ final class ProductRouteSubscriber extends RouteSubscriberBase {
 
   public function alterRoutes(RouteCollection $collection): void {
     if ($route = $collection->get('my_module.api_search')) {
-      $route->setRequirement('_csrf_token', 'FALSE');
+      // Requirement values are not booleans: '_csrf_token' => 'FALSE' would
+      // still enforce the CSRF check. Remove the key to drop a requirement.
+      $requirements = $route->getRequirements();
+      unset($requirements['_csrf_token']);
+      $route->setRequirements($requirements);
     }
   }
 
@@ -163,7 +178,7 @@ final class ProductRouteSubscriber extends RouteSubscriberBase {
 
 ### Entity route providers
 
-Content entities declare routes via annotations/attributes on the entity class:
+Content entities declare link templates on the entity class; a `route_provider` handler turns them into routes:
 
 ```php
 <?php
@@ -174,6 +189,8 @@ namespace Drupal\my_module\Entity;
 
 use Drupal\Core\Entity\Attribute\ContentEntityType;
 use Drupal\Core\Entity\ContentEntityBase;
+use Drupal\Core\Entity\ContentEntityDeleteForm;
+use Drupal\Core\Entity\Routing\DefaultHtmlRouteProvider;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\my_module\ProductAccessControlHandler;
 use Drupal\my_module\ProductListBuilder;
@@ -189,9 +206,14 @@ use Drupal\my_module\Form\ProductForm;
       'default' => ProductForm::class,
       'add' => ProductForm::class,
       'edit' => ProductForm::class,
+      'delete' => ContentEntityDeleteForm::class,
+    ],
+    'route_provider' => [
+      'html' => DefaultHtmlRouteProvider::class,
     ],
   ],
   base_table: 'product',
+  admin_permission: 'administer products',
   entity_keys: [
     'id' => 'id',
     'label' => 'title',
@@ -208,32 +230,31 @@ use Drupal\my_module\Form\ProductForm;
 final class Product extends ContentEntityBase {}
 ```
 
-This auto-generates routes like `entity.product.canonical` without manual YAML.
+The `route_provider` handler generates routes like `entity.product.canonical` from the link templates without manual YAML. Without it, `links` alone create no routes. (`DefaultHtmlRouteProvider` only adds the `collection` route when the entity type has a list builder and an `admin_permission` or `collection_permission`.)
 
 ## Route builders
 
-**Route builders** rebuild routes when underlying data changes (Views is the classic example):
+The **route builder** (`router.builder`) rebuilds all routes when underlying data changes. Don't implement `RouteBuilderInterface` yourself — flag a rebuild instead, as Views does when a view is saved:
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace Drupal\my_module\Routing;
+namespace Drupal\my_module\Service;
 
 use Drupal\Core\Routing\RouteBuilderInterface;
-use Drupal\Core\Routing\RoutingEvents;
-use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-final class ProductRouteBuilder implements RouteBuilderInterface {
+final class ProductTypeRouteInvalidator {
 
   public function __construct(
-    private readonly EventDispatcherInterface $dispatcher,
+    private readonly RouteBuilderInterface $routeBuilder,
   ) {}
 
-  public function rebuild(): void {
-    // Invalidate route cache and trigger rebuild.
-    $this->dispatcher->dispatch(new RouteBuildEvent(), RoutingEvents::DYNAMIC);
+  public function onProductTypesChanged(): void {
+    // Rebuilds once at the end of the request, re-running route_callbacks
+    // and RoutingEvents::DYNAMIC / ALTER subscribers.
+    $this->routeBuilder->setRebuildNeeded();
   }
 
 }
@@ -269,7 +290,7 @@ sequenceDiagram
     participant RM as RouteMatch
     participant PC as ParamConverter
 
-    R->>RP: getRouteByNames / match path
+    R->>RP: getRouteCollectionForRequest() / match path
     RP-->>RM: entity.product.canonical
     RM->>PC: upcast {product} → Product entity
     PC-->>RM: Product #42
@@ -319,13 +340,13 @@ final class ProductApiController extends ControllerBase {
 
 ## Route caching
 
-Routes are cached in `cache.data` with tag `route_match`:
+Routes are stored in the `router` database table; per-path lookups are cached in `cache.data` with tag `route_match`:
 
 ```bash
 # Inspect a specific route
-drush route:get entity.node.canonical
+drush route --name=entity.node.canonical
 
-# List routes matching a path
+# Show the route that serves a path
 drush route --path=/node/1
 ```
 
@@ -337,7 +358,7 @@ drush route --path=/node/1
 | Problem | Cause | Fix |
 |---------|-------|-----|
 | 404 on custom route | Module not enabled, cache stale | `drush en my_module -y && drush cr` |
-| Wrong controller runs | Route alter changed defaults | `drush route:get my_module.foo` |
+| Wrong controller runs | Route alter changed defaults | `drush route --name=my_module.foo` |
 | Parameter is raw string | Missing `options.parameters` | Add `type: entity:product` |
 | Route missing after Views change | Dynamic routes not rebuilt | `drush php:eval` router.builder rebuild |
 

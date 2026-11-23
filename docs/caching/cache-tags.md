@@ -28,12 +28,12 @@ $node = \Drupal::entityTypeManager()->getStorage('node')->load(42);
 // Individual entity tag
 $node->getCacheTags();       // ['node:42']
 
-// List tag (any query listing this type)
-$node->getListCacheTags();   // ['node_list:article'] (bundle-specific)
-                              // or ['node_list'] (type-wide)
+// List tags come from the entity type, not the entity
+$node->getEntityType()->getListCacheTags();                       // ['node_list'] (type-wide)
+$node->getEntityType()->getBundleListCacheTags($node->bundle());  // ['node_list:article'] (bundle-specific)
 
-// Combined
-$node->getCacheTagsToInvalidate(); // tags to invalidate on save
+// The entity's own tags to invalidate on save
+$node->getCacheTagsToInvalidate(); // ['node:42']; list tags are invalidated separately on save
 ```
 
 | Entity | Individual tag | List tag |
@@ -117,7 +117,7 @@ graph BT
     Page --> Block
     Block --> NodeView[Node view builder]
     NodeView --> FieldFormatter[Field formatter]
-    FieldFormatter -->|"tags: field:node:article:body"| NodeView
+    FieldFormatter -->|"tags: file:7 (referenced entity)"| NodeView
     NodeView -->|"tags: node:42"| Block
     Block -->|"tags: block_content:5"| Page
 ```

@@ -6,6 +6,8 @@ A comprehensive developer guide for Drupal 11, focused on headless/decoupled arc
 
 ## Local development
 
+Use Python 3.10 or newer (CI uses 3.13). The macOS system `python3` (3.9) is end-of-life; install a current Python via Homebrew, pyenv, or uv.
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate

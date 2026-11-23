@@ -53,6 +53,8 @@ modules/custom/jwt_auth/
     │       └── JwtAuthProvider.php
     ├── Controller/
     │   └── JwtAuthController.php
+    ├── PageCache/
+    │   └── DisallowJwtAuthRequests.php
     └── Service/
         └── JwtTokenService.php
 ```
@@ -72,7 +74,9 @@ dependencies:
 ### jwt_auth.settings.yml
 
 ```yaml
-secret_key: 'CHANGE-ME-use-a-64-char-random-string-in-production'
+# Never store the real key here: this file is exported to config/sync (and
+# usually committed). Provide it through a settings.php override instead.
+secret_key: ''
 token_ttl: 3600
 issuer: 'https://my-site.ddev.site'
 algorithm: 'HS256'
@@ -101,11 +105,10 @@ jwt_auth.settings:
 
 ### Install firebase/php-jwt
 
+Run Composer from the project root (where the site's `composer.json` lives). Running it inside the module directory creates a separate `vendor/` that Drupal never autoloads:
+
 ```bash
-cd modules/custom/jwt_auth
 composer require firebase/php-jwt
-# Or add to project root composer.json:
-# composer require firebase/php-jwt
 ```
 
 ### JwtTokenService.php
@@ -170,7 +173,7 @@ final class JwtTokenService {
     $config = $this->configFactory->get('jwt_auth.settings');
 
     try {
-      return JWT::decode(
+      $payload = JWT::decode(
         $token,
         new Key($config->get('secret_key'), $config->get('algorithm')),
       );
@@ -184,6 +187,32 @@ final class JwtTokenService {
     catch (\Exception $e) {
       throw new \RuntimeException('Invalid token: ' . $e->getMessage(), 401);
     }
+
+    if (($payload->iss ?? NULL) !== $config->get('issuer')) {
+      throw new \RuntimeException('Invalid token issuer.', 401);
+    }
+
+    return $payload;
+  }
+
+  /**
+   * Cheap pre-check for the authentication provider's applies().
+   *
+   * Reads the UNVERIFIED payload only to see whether this module issued the
+   * token (matching issuer + custom "drupal" claim). validateToken() still
+   * verifies the signature, expiry and issuer.
+   */
+  public function isOwnToken(string $token): bool {
+    $parts = explode('.', $token);
+    if (count($parts) !== 3) {
+      return FALSE;
+    }
+
+    $claims = json_decode(JWT::urlsafeB64Decode($parts[1]));
+
+    return is_object($claims)
+      && isset($claims->drupal)
+      && ($claims->iss ?? NULL) === $this->configFactory->get('jwt_auth.settings')->get('issuer');
   }
 
 }
@@ -200,7 +229,9 @@ namespace Drupal\jwt_auth\Authentication\Provider;
 
 use Drupal\Core\Authentication\AuthenticationProviderInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\jwt_auth\Service\JwtTokenService;
+use Drupal\user\UserInterface;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -217,18 +248,19 @@ final class JwtAuthProvider implements AuthenticationProviderInterface {
    * {@inheritdoc}
    */
   public function applies(Request $request): bool {
-    $authorization = $request->headers->get('Authorization', '');
-    return str_starts_with($authorization, 'Bearer ');
+    // Drupal uses only the first provider whose applies() returns TRUE. Claim
+    // only tokens this module issued, so other Bearer tokens (e.g. Simple
+    // OAuth's oauth2 provider) still reach their own provider.
+    $token = $this->getBearerToken($request);
+    return $token !== NULL && $this->jwtTokenService->isOwnToken($token);
   }
 
   /**
    * {@inheritdoc}
    */
-  public function authenticate(Request $request): ?object {
-    $authorization = $request->headers->get('Authorization', '');
-    $token = trim(substr($authorization, 7));
-
-    if ($token === '') {
+  public function authenticate(Request $request): ?AccountInterface {
+    $token = $this->getBearerToken($request);
+    if ($token === NULL) {
       return NULL;
     }
 
@@ -244,15 +276,65 @@ final class JwtAuthProvider implements AuthenticationProviderInterface {
       return NULL;
     }
 
-    return $this->entityTypeManager
+    $account = $this->entityTypeManager
       ->getStorage('user')
       ->load((int) $uid);
+
+    // A token must stop working once the account is blocked or deleted.
+    return ($account instanceof UserInterface && $account->isActive()) ? $account : NULL;
+  }
+
+  /**
+   * Extracts the Bearer token from the Authorization header.
+   */
+  private function getBearerToken(Request $request): ?string {
+    $authorization = (string) $request->headers->get('Authorization', '');
+    if (!str_starts_with($authorization, 'Bearer ')) {
+      return NULL;
+    }
+    $token = trim(substr($authorization, 7));
+    return $token === '' ? NULL : $token;
+  }
+
+}
+```
+
+### DisallowJwtAuthRequests.php
+
+Page Cache runs before authentication. Without a request policy, a response built for a JWT-authenticated user can be stored in the anonymous page cache and then served to everyone. Core's `basic_auth` and Simple OAuth ship the same kind of policy:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\jwt_auth\PageCache;
+
+use Drupal\Core\PageCache\RequestPolicyInterface;
+use Symfony\Component\HttpFoundation\Request;
+
+/**
+ * Keeps Bearer-token requests out of the page cache.
+ */
+final class DisallowJwtAuthRequests implements RequestPolicyInterface {
+
+  /**
+   * {@inheritdoc}
+   */
+  public function check(Request $request) {
+    $authorization = (string) $request->headers->get('Authorization', '');
+    if (str_starts_with($authorization, 'Bearer ')) {
+      return self::DENY;
+    }
+    return NULL;
   }
 
 }
 ```
 
 ### JwtAuthController.php
+
+The login endpoint uses `UserAuthenticationInterface` (Drupal 10.3+) instead of the legacy `UserAuthInterface::authenticate()` (its `UserAuth` implementation is deprecated in 10.3 and removed in 12.0), and reuses core's login flood control settings and counters (`user.flood` config), like core's `/user/login?_format=json` route.
 
 ```php
 <?php
@@ -263,7 +345,8 @@ namespace Drupal\jwt_auth\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\jwt_auth\Service\JwtTokenService;
-use Drupal\user\UserAuthInterface;
+use Drupal\user\UserAuthenticationInterface;
+use Drupal\user\UserFloodControlInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -274,7 +357,8 @@ use Symfony\Component\HttpFoundation\Request;
 final class JwtAuthController extends ControllerBase {
 
   public function __construct(
-    private readonly UserAuthInterface $userAuth,
+    private readonly UserAuthenticationInterface $userAuth,
+    private readonly UserFloodControlInterface $userFloodControl,
     private readonly JwtTokenService $jwtTokenService,
   ) {}
 
@@ -284,6 +368,7 @@ final class JwtAuthController extends ControllerBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get('user.auth'),
+      $container->get('user.flood_control'),
       $container->get('jwt_auth.token'),
     );
   }
@@ -300,13 +385,34 @@ final class JwtAuthController extends ControllerBase {
       return new JsonResponse(['error' => 'username and password required'], 400);
     }
 
-    $uid = $this->userAuth->authenticate($username, $password);
-    if (!$uid) {
+    // Same flood settings and event names as core's HTTP login.
+    $flood = $this->config('user.flood');
+    if (!$this->userFloodControl->isAllowed('user.failed_login_ip', $flood->get('ip_limit'), $flood->get('ip_window'))) {
+      return new JsonResponse(['error' => 'Too many failed login attempts'], 429);
+    }
+
+    $account = $this->userAuth->lookupAccount($username);
+    $identifier = NULL;
+    if ($account) {
+      $identifier = $flood->get('uid_only')
+        ? (string) $account->id()
+        : $account->id() . '-' . $request->getClientIp();
+      if (!$this->userFloodControl->isAllowed('user.http_login', $flood->get('user_limit'), $flood->get('user_window'), $identifier)) {
+        return new JsonResponse(['error' => 'Too many failed login attempts'], 429);
+      }
+    }
+
+    if (!$account || $account->isBlocked() || !$this->userAuth->authenticateAccount($account, $password)) {
+      if ($identifier !== NULL) {
+        $this->userFloodControl->register('user.http_login', $flood->get('user_window'), $identifier);
+      }
+      $this->userFloodControl->register('user.failed_login_ip', $flood->get('ip_window'));
       return new JsonResponse(['error' => 'Invalid credentials'], 401);
     }
 
-    $user = $this->entityTypeManager()->getStorage('user')->load($uid);
-    $token = $this->jwtTokenService->createToken($user);
+    $this->userFloodControl->clear('user.http_login', $identifier);
+
+    $token = $this->jwtTokenService->createToken($account);
     $ttl = (int) $this->config('jwt_auth.settings')->get('token_ttl');
 
     return new JsonResponse([
@@ -344,7 +450,15 @@ services:
     class: Drupal\jwt_auth\Authentication\Provider\JwtAuthProvider
     arguments: ['@jwt_auth.token', '@entity_type.manager']
     tags:
-      - { name: authentication_provider, provider_id: jwt_auth, priority: 100 }
+      # global: TRUE lets the provider authenticate routes that don't list it
+      # in an _auth option (such as /api/jwt/me below).
+      - { name: authentication_provider, provider_id: jwt_auth, global: TRUE, priority: 100 }
+
+  jwt_auth.page_cache_request_policy.disallow_jwt_requests:
+    class: Drupal\jwt_auth\PageCache\DisallowJwtAuthRequests
+    public: false
+    tags:
+      - { name: page_cache_request_policy }
 ```
 
 ### jwt_auth.routing.yml
@@ -377,12 +491,18 @@ issue jwt tokens:
 
 ## Enable and test
 
+```php
+// web/sites/default/settings.php — config overrides are never exported.
+$config['jwt_auth.settings']['secret_key'] = getenv('JWT_AUTH_SECRET');
+```
+
 ```bash
 drush en jwt_auth -y
 drush cr
 
-# Generate a strong secret
-drush config:set jwt_auth.settings secret_key "$(openssl rand -base64 48)" -y
+# Generate a strong secret, store it in your environment / secret store as
+# JWT_AUTH_SECRET, and load it in settings.php (see below) — not in config.
+openssl rand -base64 48
 
 # Login and get token
 curl -s -X POST \
@@ -478,6 +598,7 @@ openssl rsa -in private.pem -pubout -out public.pem
 
 ```php
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 // Sign with private key
 $token = JWT::encode($payload, file_get_contents('private.pem'), 'RS256');

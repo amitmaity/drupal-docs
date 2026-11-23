@@ -121,12 +121,9 @@ The `site_url` with `/drupal-docs/` path is required for project sites (not user
 
 To use a custom domain like `docs.example.com`:
 
-1. Add a `CNAME` file in `docs/`:
-   ```
-   docs.example.com
-   ```
+1. Enter `docs.example.com` under **Settings → Pages → Custom domain**. With GitHub Actions deployment, no `CNAME` file is needed (any `CNAME` file is ignored)
 2. Configure DNS: CNAME record pointing to `amitmaity.github.io`
-3. Enable custom domain in GitHub Pages settings
+3. Change `site_url` in `mkdocs.yml` to `https://docs.example.com/` (the site is then served from the domain root, not `/drupal-docs/`)
 
 ## Troubleshooting
 

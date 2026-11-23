@@ -23,7 +23,7 @@ drush php:eval "code"             # Run PHP
 
 ```bash
 composer require drupal/module_name
-composer update drupal/core-recommended --with-dependencies
+composer update "drupal/core-*" --with-all-dependencies
 composer remove drupal/module_name
 composer audit
 composer install --no-dev --optimize-autoloader
@@ -152,16 +152,16 @@ $build = [
 
 ## Bootstrap phases
 
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `DRUPAL_BOOTSTRAP_CONFIGURATION` | 0 | Load settings |
-| `DRUPAL_BOOTSTRAP_PAGE_CACHE` | 1 | Page cache lookup |
-| `DRUPAL_BOOTSTRAP_DATABASE` | 2 | Database connection |
-| `DRUPAL_BOOTSTRAP_VARIABLES` | 3 | Load variables |
-| `DRUPAL_BOOTSTRAP_SESSION` | 4 | Session handling |
-| `DRUPAL_BOOTSTRAP_PAGE_HEADER` | 5 | HTTP headers |
-| `DRUPAL_BOOTSTRAP_LANGUAGE` | 6 | Language system |
-| `DRUPAL_BOOTSTRAP_FULL` | 7 | Full bootstrap |
+Drupal 8+ has no numbered bootstrap phases (the `DRUPAL_BOOTSTRAP_*` constants are Drupal 7). A request goes through these `DrupalKernel` steps:
+
+| Step | Method | What it does |
+|------|--------|--------------|
+| 1 | `DrupalKernel::handle()` | Calls `bootEnvironment()` and `initializeSettings()` (loads `settings.php`) |
+| 2 | `DrupalKernel::boot()` | Sets up the file cache and builds or loads the service container (`initializeContainer()`) |
+| 3 | `http_kernel` middleware stack | `handle()` passes the request to the stack (page cache, reverse proxy, session, …) |
+| 4 | `DrupalKernel::preHandle()` | Called by the `KernelPreHandle` middleware: sanitizes the request, loads all modules, registers stream wrappers, pushes the request onto `request_stack` |
+| 5 | Symfony `HttpKernel` | Dispatches `kernel.request`, routes, runs the controller, dispatches `kernel.response` |
+| 6 | `DrupalKernel::terminate()` | Terminates the HTTP kernel, destructs `needs_destruction` services, pops the request stack |
 
 ## Recommended contrib modules (headless)
 
@@ -184,9 +184,7 @@ $build = [
 | Routing | `router.route_provider` |
 | EventDispatcher | `event_dispatcher` |
 | Serializer | `serializer` |
-| Validator | `validation.basic_recursive_validator` |
-| Cache | `cache.default` |
-| Messenger | `messenger` |
+| Validator | `validation.constraint` (constraint plugin manager) |
 
 ## PHP version features used
 

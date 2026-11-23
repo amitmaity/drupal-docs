@@ -16,6 +16,7 @@ The **Validator** component validates objects and arrays against **constraints**
 
 declare(strict_types=1);
 
+use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Validation;
 
 $validator = Validation::createValidator();
@@ -39,16 +40,15 @@ declare(strict_types=1);
 
 namespace Drupal\my_module\Plugin\Validation\Constraint;
 
-use Symfony\Component\Validator\Constraint;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\Core\Validation\Attribute\Constraint;
+use Symfony\Component\Validator\Constraint as SymfonyConstraint;
 
-/**
- * @Constraint(
- *   id = "UniqueSku",
- *   label = @Translation("Unique SKU", context = "Validation"),
- *   type = "string"
- * )
- */
-final class UniqueSkuConstraint extends Constraint {
+#[Constraint(
+  id: 'UniqueSku',
+  label: new TranslatableMarkup('Unique SKU', [], ['context' => 'Validation']),
+)]
+final class UniqueSkuConstraint extends SymfonyConstraint {
 
   public string $message = 'SKU %sku is already in use.';
 
@@ -78,14 +78,17 @@ final class UniqueSkuConstraintValidator extends ConstraintValidator implements 
     return new static($container->get('entity_type.manager'));
   }
 
-  public function validate(mixed $value, Constraint $constraint): void {
+  public function validate(mixed $items, Constraint $constraint): void {
     assert($constraint instanceof UniqueSkuConstraint);
 
+    // On a field, the constraint receives the field item list.
+    /** @var \Drupal\Core\Field\FieldItemListInterface $items */
+    $value = $items->value;
     if ($value === NULL || $value === '') {
       return;
     }
 
-    $entity = $this->context->getObject();
+    $entity = $items->getEntity();
     $query = $this->entityTypeManager->getStorage('product')->getQuery()
       ->accessCheck(FALSE)
       ->condition('sku', $value);
@@ -102,12 +105,14 @@ final class UniqueSkuConstraintValidator extends ConstraintValidator implements 
 }
 ```
 
-Attach to a field via `*.constraints.yml` or entity definition:
+Attach it to a field with `addConstraint()`. For fields that other modules define, use `hook_entity_base_field_info_alter()` or `hook_entity_bundle_field_info_alter()`.
 
-```yaml
-# my_module.constraints.yml (or field definition)
-UniqueSku:
-  type: UniqueSku
+```php
+// In Product::baseFieldDefinitions().
+$fields['sku'] = BaseFieldDefinition::create('string')
+  ->setLabel(new TranslatableMarkup('SKU'))
+  ->setRequired(TRUE)
+  ->addConstraint('UniqueSku');
 ```
 
 ### Entity::validate()
@@ -144,34 +149,24 @@ Form API `#element_validate` and `#validate` callbacks are separate from Symfony
 declare(strict_types=1);
 
 /** @var \Symfony\Component\Validator\Validator\ValidatorInterface $validator */
-$validator = \Drupal::service('validation.basic_recursive_validator');
+$validator = \Drupal::service('validation.basic_recursive_validator_factory')->createValidator();
 ```
 
 ## Built-in Symfony constraints in Drupal
 
-Drupal ships `drupal/core-validation` bridging common constraints:
+Drupal's constraint plugin manager (`validation.constraint`) registers common Symfony constraints as plugins: `Callback`, `Blank`, `NotBlank`, `Email`, `Choice`, `PositiveOrZero` and a few others. Field config YAML has no `constraints:` key; add constraints in code.
 
 === "Field definition"
 
-    ```yaml
-    # field.storage.product.email.yml
-    langcode: en
-    status: true
-    dependencies:
-      module:
-        - my_module
-    id: product.email
-    field_name: email
-    entity_type: product
-    type: email
-    settings: {  }
-    module: my_module
-    locked: false
-    cardinality: 1
-    translatable: false
-    constraints:
-      NotBlank: {}
-      Email: {}
+    ```php
+    <?php
+
+    declare(strict_types=1);
+
+    // In Product::baseFieldDefinitions().
+    $fields['email'] = BaseFieldDefinition::create('email')
+      ->setLabel(new TranslatableMarkup('Email'))
+      ->addConstraint('NotBlank');
     ```
 
 === "Programmatic validation"
@@ -188,7 +183,7 @@ Drupal ships `drupal/core-validation` bridging common constraints:
       'quantity' => [new Assert\Positive()],
     ]);
 
-    $validator = \Drupal::service('validation.basic_recursive_validator');
+    $validator = \Drupal::service('validation.basic_recursive_validator_factory')->createValidator();
     $violations = $validator->validate($payload, $constraints);
     ```
 
@@ -199,14 +194,15 @@ Drupal ships `drupal/core-validation` bridging common constraints:
 
 declare(strict_types=1);
 
-/**
- * @ContentEntityType(
- *   id = "product",
- *   constraints = {
- *     "ProductPricePositive" = {},
- *   },
- * )
- */
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+
+#[ContentEntityType(
+  id: 'product',
+  // …label, entity_keys, handlers…
+  constraints: [
+    'ProductPricePositive' => [],
+  ],
+)]
 ```
 
 ```php
@@ -216,15 +212,15 @@ declare(strict_types=1);
 
 namespace Drupal\my_module\Plugin\Validation\Constraint;
 
-use Symfony\Component\Validator\Constraint;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\Core\Validation\Attribute\Constraint;
+use Symfony\Component\Validator\Constraint as SymfonyConstraint;
 
-/**
- * @Constraint(
- *   id = "ProductPricePositive",
- *   label = @Translation("Positive price", context = "Validation"),
- * )
- */
-final class ProductPricePositiveConstraint extends Constraint {
+#[Constraint(
+  id: 'ProductPricePositive',
+  label: new TranslatableMarkup('Positive price', [], ['context' => 'Validation']),
+)]
+final class ProductPricePositiveConstraint extends SymfonyConstraint {
 
   public string $message = 'Price must be greater than zero.';
 
@@ -255,7 +251,7 @@ final class ProductPricePositiveConstraint extends Constraint {
       ) {}
 
       public static function create($container): static {
-        return new static($container->get('validation.basic_recursive_validator'));
+        return new static($container->get('validation.basic_recursive_validator_factory')->createValidator());
       }
 
       public function createProduct(Request $request): JsonResponse {

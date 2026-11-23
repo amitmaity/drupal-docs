@@ -10,11 +10,11 @@ sequenceDiagram
     participant Drupal as Drupal (ddev.site)
     participant Session as Session Store
 
-    SPA->>Drupal: POST /api/auth/login (CORS preflight)
+    SPA->>Drupal: OPTIONS /user/login?_format=json (CORS preflight)
     Drupal-->>SPA: Access-Control-Allow-Origin + credentials
     SPA->>Drupal: POST credentials
     Drupal->>Session: Create session
-    Drupal-->>SPA: Set-Cookie: SSESS... (SameSite=None; Secure)
+    Drupal-->>SPA: Set-Cookie: SSESS... (SameSite=None#59; Secure)
 
     SPA->>Drupal: GET /jsonapi/... + Cookie
     Note over SPA,Drupal: credentials: 'include'
@@ -90,12 +90,13 @@ export async function drupalFetch(
   });
 }
 
-// Login
+// Login via core's JSON login route (see Session Auth).
+// Returns { current_user, csrf_token, logout_token }.
 export async function login(username: string, password: string) {
-  const response = await drupalFetch('/api/auth/login', {
+  const response = await drupalFetch('/user/login?_format=json', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ name: username, pass: password }),
   });
 
   if (!response.ok) {
@@ -105,9 +106,18 @@ export async function login(username: string, password: string) {
   return response.json();
 }
 
-// Authenticated JSON:API request
+// Authenticated JSON:API request for the current user. JSON:API has no "me"
+// filter; the /jsonapi entry point exposes meta.links.me for logged-in users.
 export async function getMyProfile() {
-  return drupalFetch('/jsonapi/user/user?filter[uid]=@me');
+  const index = await (await drupalFetch('/jsonapi')).json();
+  const meHref: string | undefined = index.meta?.links?.me?.href;
+  if (!meHref) {
+    throw new Error('Not logged in');
+  }
+  return fetch(meHref, {
+    credentials: 'include',
+    headers: { Accept: 'application/vnd.api+json' },
+  });
 }
 ```
 

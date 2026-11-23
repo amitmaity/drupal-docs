@@ -10,7 +10,7 @@ Not every API fits JSON:API or REST resource plugins. Custom controllers returni
 | Custom aggregation / report | Custom controller |
 | Webhook receiver | Custom controller |
 | Transform external API data | Custom controller + service |
-| Alter JSON:API output | Custom normalizer |
+| Add data to JSON:API output | Computed field (or JSON:API Extras field enhancer) |
 
 ## Custom controller with JsonResponse
 
@@ -38,9 +38,8 @@ my_headless.article_feed:
     _controller: '\Drupal\my_headless\Controller\ArticleFeedController::feed'
   requirements:
     _permission: 'access article feed'
-  methods: [GET]
-  options:
     _format: 'json'
+  methods: [GET]
 
 my_headless.article_by_slug:
   path: '/api/v1/articles/{slug}'
@@ -218,7 +217,7 @@ $response->addCacheableDependency(
 
 ## Custom normalizers
 
-Normalizers transform entities during serialization. Use them to alter JSON:API output or REST responses.
+Normalizers transform entities during serialization. Use them for REST responses and your own `serializer` calls. JSON:API builds its resource objects with its own internal (`jsonapi_normalizer`) normalizers, so an entity-level normalizer like this one does not change JSON:API output (see the next section).
 
 ### ArticleTeaserNormalizer.php
 
@@ -300,44 +299,78 @@ $serializer = \Drupal::service('serializer');
 $teaser = $serializer->normalize($node, 'json', ['teaser_format' => TRUE]);
 ```
 
-## JSON:API normalizer (alter core output)
+## Adding data to JSON:API output
 
-To modify JSON:API field output globally, extend `ContentEntityNormalizer`:
+JSON:API's normalizers are internal (`@internal`) and are not an extension point: they return `CacheableNormalization` value objects rather than arrays, and services tagged `normalizer` are not used to build JSON:API resource objects. Do not extend `ResourceObjectNormalizer` or `ContentEntityNormalizer` to change JSON:API output. Use a supported approach instead:
+
+- **Computed field** (below): JSON:API exposes every field, including computed ones, as an attribute automatically.
+- **[JSON:API Extras](jsonapi.md#jsonapi-extras-contrib) field enhancers**: transform or rename existing fields without code.
+
+### Computed field example
+
+Expose `computed_slug` on article resources:
+
+```php
+<?php
+
+// my_headless.module
+
+declare(strict_types=1);
+
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\my_headless\Plugin\Field\ComputedSlugItemList;
+
+/**
+ * Implements hook_entity_base_field_info().
+ */
+function my_headless_entity_base_field_info(EntityTypeInterface $entity_type): array {
+  $fields = [];
+  if ($entity_type->id() === 'node') {
+    $fields['computed_slug'] = BaseFieldDefinition::create('string')
+      ->setLabel(new TranslatableMarkup('Computed slug'))
+      ->setComputed(TRUE)
+      ->setReadOnly(TRUE)
+      ->setClass(ComputedSlugItemList::class);
+  }
+  return $fields;
+}
+```
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace Drupal\my_headless\Normalizer;
+namespace Drupal\my_headless\Plugin\Field;
 
-use Drupal\jsonapi\JsonApiResource\ResourceObject;
-use Drupal\jsonapi\Normalizer\ResourceObjectNormalizer;
-use Drupal\node\NodeInterface;
+use Drupal\Core\Field\FieldItemList;
+use Drupal\Core\TypedData\ComputedItemListTrait;
 
 /**
- * Adds computed slug alias to JSON:API article resources.
+ * Computes the `computed_slug` value for article nodes.
  */
-final class ArticleResourceObjectNormalizer extends ResourceObjectNormalizer {
+final class ComputedSlugItemList extends FieldItemList {
+
+  use ComputedItemListTrait;
 
   /**
    * {@inheritdoc}
    */
-  public function normalize($object, $format = NULL, array $context = []): array {
-    $normalized = parent::normalize($object, $format, $context);
-
-    if ($object instanceof ResourceObject) {
-      $entity = $object->getFieldable();
-      if ($entity instanceof NodeInterface && $entity->bundle() === 'article') {
-        $normalized['attributes']['computed_slug'] = $entity->get('field_slug')->value;
-      }
+  protected function computeValue(): void {
+    $entity = $this->getEntity();
+    if ($entity->bundle() === 'article'
+      && $entity->hasField('field_slug')
+      && !$entity->get('field_slug')->isEmpty()) {
+      $this->list[0] = $this->createItem(0, $entity->get('field_slug')->value);
     }
-
-    return $normalized;
   }
 
 }
 ```
+
+After `drush cr`, `computed_slug` appears in `attributes` of `node--article` resources. Computed fields have no storage, so no database update is needed.
 
 ## Event subscribers for response alteration
 

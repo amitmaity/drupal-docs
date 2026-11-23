@@ -17,14 +17,17 @@ Drupal 11 is built **with** Symfony 7 components, not as a Symfony application. 
 | Serializer | `symfony/serializer` | JSON:API, REST, entity normalization | [serializer.md](serializer.md) |
 | Validator | `symfony/validator` | Entity/field constraints, form validation | [validator.md](validator.md) |
 | Console | `symfony/console` | Drush commands, `drupal` CLI | [console.md](console.md) |
-| Messenger | `symfony/messenger` | Status/flash messages in the admin UI | [messenger.md](messenger.md) |
-| Cache | `symfony/cache` | PSR-6 cache backends (database, APCu, Redis) | [cache.md](cache.md) |
+| Messenger | `symfony/messenger` | **Not used by core.** Drupal's `messenger` service (status messages) is its own, built on HttpFoundation's session `FlashBag` | [messenger.md](messenger.md) |
+| Cache | `symfony/cache` | **Not used by core.** Drupal has its own cache API (`CacheBackendInterface` bins); add the package with `composer require` for custom code | [cache.md](cache.md) |
 | Yaml | `symfony/yaml` | `*.yml` config, routing, services | [yaml.md](yaml.md) |
-| Translation | `symfony/translation` | String translation, locale handling | [translation.md](translation.md) |
-| Security (PasswordHasher) | `symfony/password-hasher` | User password hashing and verification | [security.md](security.md) |
+| Translation | `symfony/translation` | **Not used by core.** `t()` and `string_translation` are Drupal's own; only `symfony/translation-contracts` arrives as a dependency | [translation.md](translation.md) |
+| Security (PasswordHasher) | `symfony/password-hasher` | **Not used by core.** The `password` service (`PhpPassword`) calls PHP's `password_hash()` directly; CSRF uses Drupal's `CsrfTokenGenerator` | [security.md](security.md) |
 | Process | `symfony/process` | Running external binaries (ImageMagick, etc.) | [process.md](process.md) |
 | Filesystem | `symfony/filesystem` | Safe file copy/move/remove operations | [filesystem.md](filesystem.md) |
 | Mime | `symfony/mime` | MIME type detection, file metadata | [mime.md](mime.md) |
+| Mailer | `symfony/mailer` | Email transport for core's Symfony Mailer mail plugin | — |
+| Finder | `symfony/finder` | File discovery | — |
+| Runtime | `symfony/runtime` | Front-controller bootstrapping (`index.php` loads `autoload_runtime.php`) | — |
 | PSR HTTP Bridge | `symfony/psr-http-message-bridge` | Bridging PSR-7 messages to HttpFoundation | — |
 
 ## How components connect

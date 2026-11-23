@@ -201,14 +201,17 @@ public function getCacheMaxAge(string $contentType): int {
 
 ## Named arguments
 
+Pass arguments by parameter name and skip optional ones you don't need:
+
 ```php
-$node = Node::create([
-  'type' => 'article',
-  'title' => 'Headless Drupal',
-  'uid' => 1,
-  'status' => NodeInterface::PUBLISHED,
-  'promote' => FALSE,
-]);
+// Skip $associative and $depth, set only $flags.
+$data = json_decode($json, flags: JSON_THROW_ON_ERROR);
+
+// Skip $flags and $encoding, set only $double_encode.
+$safe = htmlspecialchars($input, double_encode: FALSE);
+
+// Plugin attributes use named arguments too, e.g.
+// #[Block(id: 'featured_products', admin_label: new TranslatableMarkup('Featured Products'))]
 ```
 
 ## Union and intersection types

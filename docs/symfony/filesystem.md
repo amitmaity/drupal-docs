@@ -1,6 +1,6 @@
 # Filesystem
 
-The **Filesystem** component provides portable file and directory operations: copy, move, remove, mkdir, and symlink. Drupal's `file_system` service wraps Symfony Filesystem with stream wrapper awareness.
+The **Filesystem** component provides portable file and directory operations: copy, move, remove, mkdir, and symlink. Drupal's `file_system` service is a separate, stream-wrapper-aware API built on PHP's file functions; it does not use Symfony Filesystem internally. Core requires `symfony/filesystem`, so custom code can use it directly.
 
 ## Core concepts
 
@@ -35,6 +35,8 @@ $fs->remove('/tmp/my-dir');
 <?php
 
 declare(strict_types=1);
+
+use Drupal\Core\File\FileSystemInterface;
 
 /** @var \Drupal\Core\File\FileSystemInterface $fileSystem */
 $fileSystem = \Drupal::service('file_system');
@@ -103,15 +105,16 @@ $path = \Drupal::service('file_system')->realpath(dirname($uri));
       }
 
       public function exportToDirectory(array $productFiles, string $destinationUri): string {
-        $destDir = $this->fileSystem->realpath($destinationUri)
-          ?: $this->fileSystem->dirname($destinationUri);
-
         $this->fileSystem->prepareDirectory(
           $destinationUri,
           FileSystemInterface::CREATE_DIRECTORY | FileSystemInterface::MODIFY_PERMISSIONS,
         );
 
-        $stagingDir = $this->fileSystem->tempnam('temporary://', 'export_');
+        // glob() and ZipArchive need real paths, not stream wrapper URIs.
+        $destDir = $this->fileSystem->realpath($destinationUri);
+        $stagingDir = $this->fileSystem->realpath(
+          $this->fileSystem->tempnam('temporary://', 'export_'),
+        );
         $this->filesystem->remove($stagingDir);
         $this->filesystem->mkdir($stagingDir);
 
@@ -153,6 +156,7 @@ $path = \Drupal::service('file_system')->realpath(dirname($uri));
 
     use Drupal\my_module\Service\ProductArchiveService;
     use Drush\Attributes as CLI;
+    use Drush\Boot\DrupalBootLevels;
     use Drush\Commands\DrushCommands;
 
     final class ExportCommands extends DrushCommands {
@@ -164,7 +168,7 @@ $path = \Drupal::service('file_system')->realpath(dirname($uri));
       }
 
       #[CLI\Command(name: 'my-module:export:products')]
-      #[CLI\Bootstrap(level: CLI\Bootstrap::FULL)]
+      #[CLI\Bootstrap(level: DrupalBootLevels::FULL)]
       public function export(): void {
         $files = [
           'products.csv' => "sku,title\nW-001,Widget\n",

@@ -33,6 +33,7 @@ declare(strict_types=1);
 namespace Drupal\my_module\Commands;
 
 use Drush\Attributes as CLI;
+use Drush\Boot\DrupalBootLevels;
 use Drush\Commands\DrushCommands;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 
@@ -46,7 +47,7 @@ final class ProductCommands extends DrushCommands {
 
   #[CLI\Command(name: 'my-module:product:sync', aliases: ['mps'])]
   #[CLI\Argument(name: 'source', description: 'CSV file path')]
-  #[CLI\Bootstrap(level: CLI\Bootstrap::FULL)]
+  #[CLI\Bootstrap(level: DrupalBootLevels::FULL)]
   public function sync(string $source): void {
     if (!is_readable($source)) {
       throw new \InvalidArgumentException("Cannot read: {$source}");
@@ -112,7 +113,8 @@ $kernel = DrupalKernel::createFromRequest(Request::createFromGlobals(), $autoloa
 $kernel->boot();
 
 $application = new Application('My Module CLI');
-$application->add(new \Drupal\my_module\Command\CleanupCommand());
+// Application::add() is deprecated since Symfony 7.4; use addCommand().
+$application->addCommand(new \Drupal\my_module\Command\CleanupCommand());
 $application->run();
 ```
 
@@ -128,13 +130,14 @@ $application->run();
     namespace Drupal\my_module\Commands;
 
     use Drush\Attributes as CLI;
+    use Drush\Boot\DrupalBootLevels;
     use Drush\Commands\DrushCommands;
 
     final class CacheCommands extends DrushCommands {
 
       #[CLI\Command(name: 'my-module:cache:warm')]
       #[CLI\Option(name: 'tag', description: 'Cache tag to warm')]
-      #[CLI\Bootstrap(level: CLI\Bootstrap::FULL)]
+      #[CLI\Bootstrap(level: DrupalBootLevels::FULL)]
       public function warm(array $options = ['tag' => 'my_module:products']): void {
         $tag = $options['tag'];
         $this->logger()->info('Warming cache for tag: {tag}', ['tag' => $tag]);
@@ -217,7 +220,7 @@ if (!$io->confirm('Delete all orphaned products?', FALSE)) {
 ```
 
 !!! warning "Bootstrap level"
-    Commands that need the database or entity API must use `#[CLI\Bootstrap(level: CLI\Bootstrap::FULL)]`. Configuration-only commands can use `CONFIGURATION` or `NONE` for speed.
+    Commands that need the database or entity API must use `#[CLI\Bootstrap(level: DrupalBootLevels::FULL)]` (`use Drush\Boot\DrupalBootLevels;`). Configuration-only commands can use `DrupalBootLevels::CONFIGURATION` or `DrupalBootLevels::NONE` for speed.
 
 ## Custom module example: nightly report command
 
@@ -230,6 +233,7 @@ namespace Drupal\my_module\Commands;
 
 use Drupal\Core\Database\Connection;
 use Drush\Attributes as CLI;
+use Drush\Boot\DrupalBootLevels;
 use Drush\Commands\DrushCommands;
 
 final class ReportCommands extends DrushCommands {
@@ -241,7 +245,7 @@ final class ReportCommands extends DrushCommands {
   }
 
   #[CLI\Command(name: 'my-module:report:daily')]
-  #[CLI\Bootstrap(level: CLI\Bootstrap::FULL)]
+  #[CLI\Bootstrap(level: DrupalBootLevels::FULL)]
   public function dailyReport(): void {
     $io = $this->io();
     $io->title('Daily product report');

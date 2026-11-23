@@ -143,20 +143,28 @@ Cron automatically processes queues annotated with `cron: ['time' => N]`.
 
 ## Delayed queues
 
-Use the queue's delay API for retry with backoff:
+To retry an item later with backoff, throw `DelayedRequeueException` from `processItem()`:
 
 ```php
-$queue = \Drupal::queue('example_module_email');
-$queue->createItem($data);
+use Drupal\Core\Queue\DelayedRequeueException;
 
-// Re-queue failed item with 5-minute delay (if supported by backend).
-if (method_exists($queue, 'delayItem')) {
-  $queue->delayItem($item, 300);
+public function processItem($data): void {
+  try {
+    $this->sendEmail($data);
+  }
+  catch (\RuntimeException $e) {
+    // Retry in 5 minutes. Cron calls delayItem() when the backend
+    // implements DelayableQueueInterface (the default DatabaseQueue does);
+    // otherwise the item keeps its current lease.
+    throw new DelayedRequeueException(300, $e->getMessage(), 0, $e);
+  }
 }
 ```
 
+Throw `RequeueException` to release the item for immediate retry, or `SuspendQueueException` to stop processing the whole queue for this run.
+
 !!! note "Reliable vs unreliable"
-    `\Drupal::queue()` returns a **reliable** database-backed queue by default. Use `\Drupal::service('queue')->get('name', FALSE)` for memory-only unreliable queues.
+    `\Drupal::queue($name, $reliable = FALSE)` defaults to **unreliable**, but both modes resolve to the database queue (`queue.database`) unless `settings.php` sets `queue_reliable_service_{name}`, `queue_service_{name}` or `queue_default`. Pass `TRUE` when an alternative backend must guarantee FIFO, at-least-once delivery.
 
 !!! warning "Idempotent processing"
     Design `processItem()` to be safe if run twice. Items may be retried after timeouts or crashes.

@@ -1,6 +1,6 @@
 # What Changed in Drupal 11
 
-Drupal 11 is a major evolution of the platform introduced in June 2024. It removes legacy baggage while embracing modern PHP and Symfony patterns.
+Drupal 11 is a major evolution of the platform, released on 2 August 2024. It removes legacy baggage while embracing modern PHP and Symfony patterns.
 
 ## Key changes
 
@@ -11,7 +11,7 @@ Drupal 11 requires **PHP 8.3 or later**. This unlocks:
 - Typed class constants
 - `#[\Override]` attribute
 - `json_validate()` native function
-- Improved performance via JIT
+- Dynamic class constant fetch (`Foo::{$name}`)
 
 ```php
 <?php
@@ -94,18 +94,18 @@ Hooks can now be implemented as class methods with the `#[Hook]` attribute:
 
 ### Removed modules and themes
 
-These were removed from core (use contrib replacements):
+Drupal 11.0 removed these modules from core (use the contrib replacements):
 
 | Removed | Replacement |
 |---------|-------------|
+| `action` (Actions UI) | [Actions UI](https://www.drupal.org/project/action) contrib |
 | `book` | [Book](https://www.drupal.org/project/book) contrib |
 | `forum` | [Forum](https://www.drupal.org/project/forum) contrib |
 | `statistics` | [Statistics](https://www.drupal.org/project/statistics) contrib |
 | `tour` | [Tour](https://www.drupal.org/project/tour) contrib |
-| `help` | Inline help in admin UI |
-| `quickedit` | Removed (no direct replacement) |
-| `color` | Theme-level color management |
-| `rdf` | [RDF](https://www.drupal.org/project/rdf) contrib |
+| `tracker` (Activity Tracker) | [Activity Tracker](https://www.drupal.org/project/tracker) contrib |
+
+`quickedit`, `color` and `rdf` were already removed in Drupal 10.0. `help` is still in core.
 
 ### Single-Directory Components (SDC)
 
@@ -140,8 +140,8 @@ slots:
 Drupal 11.1 enhanced the **recipe system** for site building:
 
 ```bash
-# Apply a recipe during installation
-drush site:install --recipe=drupal_cms_starter
+# Install from a recipe (pass the recipe directory instead of a profile name)
+drush site:install core/recipes/standard
 ```
 
 ### CKEditor 5 only
@@ -157,8 +157,11 @@ CKEditor 4 is removed. All rich text uses **CKEditor 5**.
 ## Upgrade path from Drupal 10
 
 ```bash
-# Update core constraint in composer.json
-composer require 'drupal/core-recommended:^11' --update-with-all-dependencies
+# Update all three core packages together, then resolve
+composer require 'drupal/core-recommended:^11' \
+  'drupal/core-composer-scaffold:^11' \
+  'drupal/core-project-message:^11' --no-update
+composer update --with-all-dependencies
 
 # Run database updates
 drush updatedb -y
@@ -168,4 +171,4 @@ drush cr
 ```
 
 !!! warning "Check contrib compatibility"
-    Run `drush pm:security` and verify all contrib modules support Drupal 11 before upgrading production sites.
+    Install the [Upgrade Status](https://www.drupal.org/project/upgrade_status) module on your Drupal 10 site and resolve everything it reports (contrib versions, deprecated API use) before upgrading production sites. The site must be on Drupal 10.3 or later first.

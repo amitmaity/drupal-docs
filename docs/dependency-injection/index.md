@@ -21,7 +21,7 @@ graph TB
     end
 
     subgraph compile [Compile Time]
-        CB[DrupalContainerBuilder]
+        CB[ContainerBuilder]
         CP[Compiler Passes]
         DUMP[PHP cache dump]
     end

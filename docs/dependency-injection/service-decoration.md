@@ -179,12 +179,12 @@ final class LoggingProductSyncService implements ProductSyncServiceInterface {
 
 ## Decoration priority
 
-Multiple decorators can wrap the same service. `decoration_priority` controls ordering (higher = outermost):
+Multiple decorators can wrap the same service. `decoration_priority` controls ordering: higher priorities are applied earlier, so they sit closer to the original service (innermost). The lowest priority ends up outermost:
 
 ```mermaid
 graph TB
-    CALLER --> D1[Logging decorator priority 10]
-    D1 --> D2[Caching decorator priority 5]
+    CALLER --> D1[Caching decorator priority 5]
+    D1 --> D2[Logging decorator priority 10]
     D2 --> CORE[ProductManager]
 ```
 
@@ -203,7 +203,7 @@ services:
     arguments: ['@.inner', '@logger.channel.my_module']
 ```
 
-Call flow: `LoggingProductManager` → `CachedProductManager` → `ProductManager`.
+Call flow: `CachedProductManager` → `LoggingProductManager` → `ProductManager` (cache hits are not logged). To log every call, give the logging decorator the lower priority.
 
 ## Decoration inner name
 
@@ -273,7 +273,7 @@ Common core patterns:
 
 - Cache backend chaining
 - Logger channel decoration
-- Middleware wrapping HttpKernel
+- Middleware wrapping HttpKernel (same idea, but wired by the `http_middleware` tag rather than `decorates:`)
 
 ## Verify decoration
 

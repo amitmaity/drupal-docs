@@ -65,7 +65,7 @@ composer update drupal/token --with-dependencies
 ### Update Drupal core
 
 ```bash
-composer update drupal/core-recommended --with-dependencies
+composer update "drupal/core-*" --with-all-dependencies
 drush updatedb -y
 drush cr
 ```
@@ -104,7 +104,9 @@ composer audit
       "drupal/core-composer-scaffold": true,
       "drupal/core-project-message": true,
       "phpstan/extension-installer": true,
-      "dealerdirect/phpcodesniffer-composer-installer": true
+      "dealerdirect/phpcodesniffer-composer-installer": true,
+      "php-http/discovery": true,
+      "symfony/runtime": true
     }
   },
   "extra": {

@@ -42,9 +42,11 @@ Never compare plain text — always use `check()`:
 
 declare(strict_types=1);
 
-use Drupal\user\Entity\User;
-
-$user = user_load_by_name('admin');
+// user_load_by_name() is deprecated in drupal:11.4.0.
+$users = \Drupal::entityTypeManager()
+  ->getStorage('user')
+  ->loadByProperties(['name' => 'admin']);
+$user = reset($users);
 $storedHash = $user->getPassword();
 
 if (\Drupal::service('password')->check($submittedPassword, $storedHash)) {
@@ -54,7 +56,7 @@ if (\Drupal::service('password')->check($submittedPassword, $storedHash)) {
 
 ### Rehashing on login
 
-If the hash algorithm changes, Drupal rehashes on successful login via `user_login_finalize()`.
+If the hash algorithm or its options change, Drupal rehashes the password on successful login. `UserAuth::authenticate()` calls `needsRehash()` and saves a new hash.
 
 ## CSRF protection
 
@@ -67,15 +69,16 @@ Every Form API form gets a `form_token` and `form_build_id` automatically. Do no
 Protect destructive GET routes (prefer POST, but Drupal admin UIs sometimes use GET with tokens):
 
 ```yaml
-my_module.product_delete:
-  path: '/admin/products/{product}/delete'
+my_module.product_publish:
+  path: '/admin/products/{product}/publish'
   defaults:
-    _form: '\Drupal\my_module\Form\ProductDeleteForm'
+    _controller: '\Drupal\my_module\Controller\ProductController::publish'
   requirements:
-    _entity_access: 'product.delete'
+    _entity_access: 'product.update'
+    _csrf_token: 'TRUE'
 ```
 
-Forms include `confirm_form` with built-in CSRF.
+Links built with `Url::fromRoute()` get the `?token=` query argument added automatically. Form routes do not need `_csrf_token`: Form API forms, including `ConfirmFormBase` confirmation forms, carry their own `form_token`.
 
 ### Manual token validation
 
@@ -84,7 +87,12 @@ Forms include `confirm_form` with built-in CSRF.
 
 declare(strict_types=1);
 
+namespace Drupal\my_module\Controller;
+
 use Drupal\Core\Access\CsrfTokenGenerator;
+use Drupal\Core\Controller\ControllerBase;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 
 final class WebhookController extends ControllerBase {
 
@@ -152,7 +160,8 @@ Headless session auth requires fetching `session/token` (REST) or `X-CSRF-Token`
           'status' => 1,
         ]);
 
-        // Never store plain text — hash before setPassword().
+        // Pass the plain-text password: the password field hashes it on save
+        // (PasswordItem::preSave()). Hashing it yourself first would double-hash it.
         $user->setPassword($plainPassword);
         $user->save();
 

@@ -44,15 +44,18 @@ use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\example_module\Service\GreetingGenerator;
 use Drupal\Tests\UnitTestCase;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Group;
 
 /**
- * @coversDefaultClass \Drupal\example_module\Service\GreetingGenerator
- * @group example_module
+ * Tests the greeting generator.
  */
+#[CoversClass(GreetingGenerator::class)]
+#[Group('example_module')]
 final class GreetingGeneratorTest extends UnitTestCase {
 
   /**
-   * @covers ::generate
+   * Tests that generate() uses the configured greeting.
    */
   public function testGenerateUsesConfigGreeting(): void {
     $config = $this->createMock(ImmutableConfig::class);
@@ -79,7 +82,7 @@ final class GreetingGeneratorTest extends UnitTestCase {
 
 ## Kernel test
 
-Kernel tests boot a minimal Drupal environment with an in-memory database.
+Kernel tests boot a minimal Drupal environment against the test database configured in `SIMPLETEST_DB` (SQLite, MySQL or PostgreSQL), without installing a full site.
 
 ### `tests/src/Kernel/GreetingGeneratorKernelTest.php`
 
@@ -92,11 +95,16 @@ namespace Drupal\Tests\example_module\Kernel;
 
 use Drupal\example_module\Service\GreetingGenerator;
 use Drupal\KernelTests\KernelTestBase;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * @coversDefaultClass \Drupal\example_module\Service\GreetingGenerator
- * @group example_module
+ * Tests the greeting generator with installed config.
  */
+#[CoversClass(GreetingGenerator::class)]
+#[Group('example_module')]
+#[RunTestsInSeparateProcesses]
 final class GreetingGeneratorKernelTest extends KernelTestBase {
 
   /**
@@ -118,7 +126,7 @@ final class GreetingGeneratorKernelTest extends KernelTestBase {
   }
 
   /**
-   * @covers ::generate
+   * Tests generate() with the module's default config.
    */
   public function testGenerateWithInstalledConfig(): void {
     /** @var \Drupal\example_module\Service\GreetingGenerator $generator */
@@ -147,23 +155,28 @@ namespace Drupal\Tests\example_module\Kernel;
 
 use Drupal\example_module\Entity\Task;
 use Drupal\KernelTests\Core\Entity\EntityKernelTestBase;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * @group example_module
+ * Tests the Task entity.
  */
+#[Group('example_module')]
+#[RunTestsInSeparateProcesses]
 final class TaskEntityTest extends EntityKernelTestBase {
 
   /**
    * {@inheritdoc}
    */
-  protected static $modules = ['example_module', 'user', 'system'];
+  protected static $modules = ['example_module'];
 
   /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
+    // EntityKernelTestBase already enables user, system, field, text and
+    // filter, and installs the user entity schema.
     parent::setUp();
-    $this->installEntitySchema('user');
     $this->installEntitySchema('example_task');
   }
 
@@ -200,12 +213,14 @@ declare(strict_types=1);
 namespace Drupal\Tests\example_module\Functional;
 
 use Drupal\Tests\BrowserTestBase;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Tests the greeting page.
- *
- * @group example_module
  */
+#[Group('example_module')]
+#[RunTestsInSeparateProcesses]
 final class GreetingPageTest extends BrowserTestBase {
 
   /**
@@ -249,10 +264,14 @@ declare(strict_types=1);
 namespace Drupal\Tests\example_module\FunctionalJavascript;
 
 use Drupal\FunctionalJavascriptTests\WebDriverTestBase;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * @group example_module
+ * Tests the AJAX demo form.
  */
+#[Group('example_module')]
+#[RunTestsInSeparateProcesses]
 final class AjaxDemoFormTest extends WebDriverTestBase {
 
   protected static $modules = ['example_module'];
@@ -304,15 +323,18 @@ ddev exec vendor/bin/phpunit -c web/core/phpunit.xml.dist \
 | Suite | Base class | Boots Drupal | Database | HTTP |
 |-------|-----------|--------------|----------|------|
 | Unit | `UnitTestCase` | No | No | No |
-| Kernel | `KernelTestBase` | Partial | SQLite | No |
-| Functional | `BrowserTestBase` | Full | SQLite | Yes |
-| JS Functional | `WebDriverTestBase` | Full | SQLite | Real browser |
+| Kernel | `KernelTestBase` | Partial | `SIMPLETEST_DB` | No |
+| Functional | `BrowserTestBase` | Full | `SIMPLETEST_DB` | Yes |
+| JS Functional | `WebDriverTestBase` | Full | `SIMPLETEST_DB` | Real browser |
 
 !!! tip "Use the smallest suite"
     Prefer Unit tests for pure logic, Kernel for services and entities, Functional only for routes and UI flows.
 
-!!! note "@group annotation"
-    The `@group example_module` tag lets you run all module tests with `--group example_module`.
+!!! note "PHPUnit attributes"
+    Use PHPUnit attributes (`#[Group('example_module')]`, `#[CoversClass(...)]`) instead of `@group` / `@covers` docblock annotations, which are deprecated in PHPUnit 11 and removed in PHPUnit 12. `#[Group('example_module')]` lets you run all module tests with `--group example_module`.
+
+!!! warning "Process isolation (Drupal 11.3+)"
+    Since Drupal 11.3, every concrete Kernel, Functional and FunctionalJavascript test class must declare `#[RunTestsInSeparateProcesses]`; omitting it is deprecated and will throw in Drupal 12.
 
 !!! warning "Functional test isolation"
-    Functional tests reinstall Drupal per class by default. Keep `$modules` minimal to speed up runs.
+    Functional tests reinstall Drupal for **each test method**. Group related assertions into fewer methods and keep `$modules` minimal to speed up runs.

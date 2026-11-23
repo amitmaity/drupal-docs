@@ -31,7 +31,7 @@ $messenger->addWarning('Stock is low.');
 $messenger->addError('Payment failed.');
 ```
 
-`Messenger` stores messages in the session under keys like `drupal_status_messages`. The `status_messages` render element displays them in the page template.
+`Messenger` stores messages in the session flash bag (the `session.flash_bag` service, Symfony HttpFoundation's `FlashBag`). The `status_messages` render element displays them in the page template.
 
 ### MessengerTrait in controllers and forms
 
@@ -43,10 +43,11 @@ declare(strict_types=1);
 namespace Drupal\my_module\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 
 final class ProductController extends ControllerBase {
 
-  public function publish(int $id): array {
+  public function publish(int $id): RedirectResponse {
     // …publish logic…
     $this->messenger()->addStatus($this->t('Product @id published.', ['@id' => $id]));
     return $this->redirect('my_module.product_list');
@@ -149,36 +150,38 @@ final class LoggingMessenger implements MessengerInterface {
     private readonly LoggerInterface $logger,
   ) {}
 
-  public function addMessage($message, $type = self::TYPE_STATUS, $repeat = FALSE): void {
+  public function addMessage($message, $type = self::TYPE_STATUS, $repeat = FALSE): static {
     $this->logger->info('[{type}] {message}', [
       'type' => $type,
       'message' => (string) $message,
     ]);
     $this->inner->addMessage($message, $type, $repeat);
+    return $this;
   }
 
-  public function addError($message, $repeat = FALSE): void {
-    $this->addMessage($message, self::TYPE_ERROR, $repeat);
+  public function addError($message, $repeat = FALSE): static {
+    return $this->addMessage($message, self::TYPE_ERROR, $repeat);
   }
 
-  public function addStatus($message, $repeat = FALSE): void {
-    $this->addMessage($message, self::TYPE_STATUS, $repeat);
+  public function addStatus($message, $repeat = FALSE): static {
+    return $this->addMessage($message, self::TYPE_STATUS, $repeat);
   }
 
-  public function addWarning($message, $repeat = FALSE): void {
-    $this->addMessage($message, self::TYPE_WARNING, $repeat);
+  public function addWarning($message, $repeat = FALSE): static {
+    return $this->addMessage($message, self::TYPE_WARNING, $repeat);
   }
 
   public function all(): array {
     return $this->inner->all();
   }
 
-  public function deleteByType($type): void {
-    $this->inner->deleteByType($type);
+  // The status_messages element renders the messages these two return.
+  public function deleteByType($type): array {
+    return $this->inner->deleteByType($type);
   }
 
-  public function deleteAll(): void {
-    $this->inner->deleteAll();
+  public function deleteAll(): array {
+    return $this->inner->deleteAll();
   }
 
   public function messagesByType($type): array {

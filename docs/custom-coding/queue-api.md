@@ -170,17 +170,22 @@ use Drupal\Core\Queue\QueueFactory;
 /** @var QueueFactory $factory */
 $factory = \Drupal::service('queue');
 
-// Reliable (database-backed) — default.
+// Reliable: uses $settings['queue_reliable_service_example_module_email']
+// if set, otherwise falls through to the defaults below.
 $reliable = $factory->get('example_module_email', TRUE);
 
-// Unreliable (in-memory per request) — items lost after request ends.
+// Unreliable (the default for get() and \Drupal::queue()): uses
+// $settings['queue_service_example_module_email'], then
+// $settings['queue_default'], then 'queue.database'.
 $unreliable = $factory->get('example_module_email', FALSE);
 ```
 
-| Type | Persistence | Use case |
-|------|-------------|----------|
-| Reliable | Survives requests | Email, indexing, imports |
-| Unreliable | Request lifetime | Low-priority, regenerable cache warming |
+| Flag | Default backend | Guarantee |
+|------|-----------------|-----------|
+| `TRUE` | `queue.database` (persistent) | Backend must preserve order and deliver each item at least once |
+| `FALSE` | `queue.database` (persistent) | No ordering or delivery guarantee required — lets you swap in a faster backend (e.g. Redis) |
+
+With core alone both calls return the same persistent `DatabaseQueue`; the flag only matters once alternative queue backends are configured.
 
 ---
 
@@ -196,7 +201,7 @@ stateDiagram-v2
 ```
 
 !!! warning "Claim lease"
-    If `processItem()` throws or times out, call `releaseItem()` so another worker can retry. Items left claimed expire after `queue_mail_queue_time` (default 30s).
+    If `processItem()` throws or times out, call `releaseItem()` so another worker can retry. A claim lasts for the lease passed to `claimItem($lease_time)` — `DatabaseQueue` defaults to 30 seconds, and cron claims with the worker's `cron: ['time' => N]`. Expired leases are reset by `DatabaseQueue::garbageCollection()` during system cron.
 
 !!! tip "Batch vs queue"
     Use **Batch API** when a user waits for progress. Use **Queue API** when work can happen asynchronously via cron.

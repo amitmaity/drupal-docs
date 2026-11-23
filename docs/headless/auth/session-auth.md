@@ -11,7 +11,7 @@ sequenceDiagram
     participant Session as Session Store
     participant DB as Database
 
-    Browser->>Drupal: POST /user/login (name + pass)
+    Browser->>Drupal: POST /user/login?_format=json (name + pass)
     Drupal->>DB: Validate credentials
     Drupal->>Session: Create session (SSESS... cookie)
     Drupal-->>Browser: Set-Cookie: SSESS...
@@ -24,118 +24,62 @@ sequenceDiagram
 
 ## Login via JSON
 
-Drupal core does not ship a JSON login endpoint. Options:
+Drupal core's User module ships JSON endpoints for session login, so you do not need a custom controller:
 
-1. **User HTTP Routes** (contrib) — `drupal/user_http_auth`
-2. **Custom login controller** (shown below)
-3. **OAuth 2.0** for cross-origin SPAs (preferred)
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/user/login?_format=json` | POST | Log in. Body: `{"name": "...", "pass": "..."}` |
+| `/user/login_status?_format=json` | GET | Returns `1` when logged in, `0` when not |
+| `/user/logout?_format=json&token={logout_token}` | POST | Log out. `token` is the `logout_token` from the login response |
+| `/user/password?_format=json` | POST | Send a password-reset email |
 
-### Custom session login controller
+The login route already applies core flood control (the IP and per-account limits in `user.flood` config), rejects blocked accounts, and regenerates the session.
 
-```php
-<?php
+```bash
+# Log in: the session cookie is stored in cookies.txt
+curl -s -c cookies.txt -X POST \
+  -H "Content-Type: application/json" \
+  "https://my-site.ddev.site/user/login?_format=json" \
+  -d '{"name":"editor","pass":"secret"}'
+```
 
-declare(strict_types=1);
+Response:
 
-namespace Drupal\my_auth\Controller;
-
-use Drupal\Core\Controller\ControllerBase;
-use Drupal\user\UserAuthInterface;
-use Symfony\Component\DependencyInjection\ContainerInterface;
-use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
-
-/**
- * JSON login endpoint that establishes a Drupal session.
- */
-final class SessionLoginController extends ControllerBase {
-
-  public function __construct(
-    private readonly UserAuthInterface $userAuth,
-  ) {}
-
-  /**
-   * {@inheritdoc}
-   */
-  public static function create(ContainerInterface $container): static {
-    return new static(
-      $container->get('user.auth'),
-    );
-  }
-
-  /**
-   * Authenticates user and returns session info.
-   */
-  public function login(Request $request): JsonResponse {
-    $payload = json_decode($request->getContent(), TRUE) ?? [];
-    $username = $payload['username'] ?? '';
-    $password = $payload['password'] ?? '';
-
-    if ($username === '' || $password === '') {
-      return new JsonResponse(['error' => 'username and password required'], 400);
-    }
-
-    $uid = $this->userAuth->authenticate($username, $password);
-    if (!$uid) {
-      return new JsonResponse(['error' => 'Invalid credentials'], 401);
-    }
-
-    $user = $this->entityTypeManager()->getStorage('user')->load($uid);
-    user_login_finalize($user);
-
-    return new JsonResponse([
-      'uid' => (int) $uid,
-      'name' => $user->getAccountName(),
-      'csrf_token' => \Drupal::csrfToken()->get('rest'),
-    ]);
-  }
-
-  /**
-   * Destroys the current session.
-   */
-  public function logout(): Response {
-    user_logout();
-    return new JsonResponse(['message' => 'Logged out']);
-  }
-
+```json
+{
+  "current_user": { "uid": "2", "roles": ["authenticated", "editor"], "name": "editor" },
+  "csrf_token": "x3Fc...",
+  "logout_token": "9QxP..."
 }
 ```
 
-```yaml
-# my_auth.routing.yml
-my_auth.session_login:
-  path: '/api/auth/login'
-  defaults:
-    _controller: '\Drupal\my_auth\Controller\SessionLoginController::login'
-  requirements:
-    _access: 'TRUE'
-  methods: [POST]
+```bash
+# Check login status
+curl -s -b cookies.txt "https://my-site.ddev.site/user/login_status?_format=json"
 
-my_auth.session_logout:
-  path: '/api/auth/logout'
-  defaults:
-    _controller: '\Drupal\my_auth\Controller\SessionLoginController::logout'
-  requirements:
-    _user_is_logged_in: 'TRUE'
-  methods: [POST]
+# Log out with the logout_token from the login response
+curl -s -b cookies.txt -X POST \
+  "https://my-site.ddev.site/user/logout?_format=json&token=$LOGOUT_TOKEN"
 ```
+
+!!! warning "Writing your own login endpoint"
+    Prefer the core routes. If you must build a custom one, authenticate with `UserAuthenticationInterface::lookupAccount()` and `authenticateAccount()` (Drupal 10.3+), not the legacy `UserAuthInterface::authenticate()` (its `UserAuth` implementation is deprecated in 10.3 and removed in 12.0). Also copy the `user.flood_control` checks from core's `UserAuthenticationController`: a login route without flood control is open to password brute-forcing.
 
 ## CSRF protection for state-changing requests
 
 Session-authenticated POST/PATCH/DELETE requests require a CSRF token:
 
 ```bash
-# 1. Login (establishes session cookie)
-curl -s -c cookies.txt -X POST \
+# 1. Login (establishes session cookie; the response contains csrf_token)
+TOKEN=$(curl -s -c cookies.txt -X POST \
   -H "Content-Type: application/json" \
-  https://my-site.ddev.site/api/auth/login \
-  -d '{"username":"editor","password":"secret"}'
+  "https://my-site.ddev.site/user/login?_format=json" \
+  -d '{"name":"editor","pass":"secret"}' | jq -r '.csrf_token')
 
-# 2. Extract CSRF token from response
+# 2. Or fetch a CSRF token for an existing session
 TOKEN=$(curl -s -b cookies.txt https://my-site.ddev.site/session/token)
 
-# 3. PATCH with CSRF header
+# 3. PATCH with CSRF header (JSON:API must allow writes: read_only false)
 curl -s -b cookies.txt -X PATCH \
   -H "X-CSRF-Token: $TOKEN" \
   -H "Content-Type: application/vnd.api+json" \

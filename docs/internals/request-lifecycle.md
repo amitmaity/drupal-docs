@@ -19,10 +19,10 @@ sequenceDiagram
     C->>IP: HTTP Request
     IP->>DK: handle($request)
     DK->>DK: bootstrapToPhase(FULL)
-    DK->>HK: handle($request)
+    DK->>MW: middleware stack
+    MW->>HK: handle($request)
     HK->>HK: KernelEvents::REQUEST
-    HK->>MW: middleware stack
-    MW->>RT: match route
+    HK->>RT: match route (RouterListener)
     RT->>AC: check access
     AC->>CT: call controller
     CT->>RS: Response / RenderArray
@@ -78,22 +78,28 @@ namespace Drupal\Core;
 
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\HttpKernel\TerminableInterface;
 
-final class DrupalKernel extends HttpKernel implements HttpKernelInterface {
+// Simplified excerpt — exception handling omitted.
+class DrupalKernel implements DrupalKernelInterface, TerminableInterface {
 
-  public function handle(
-    Request $request,
-    int $type = self::MAIN_REQUEST,
-    bool $catch = TRUE,
-  ): Response {
-    // Ensure full bootstrap before delegating to HttpKernel.
-    $this->boot();
-    return parent::handle($request, $type, $catch);
+  public function handle(Request $request, $type = self::MAIN_REQUEST, $catch = TRUE): Response {
+    static::bootEnvironment();
+    if (!$this->booted) {
+      $this->initializeSettings($request);
+      $this->boot();
+    }
+    // Delegate to the 'http_kernel' service: the middleware stack wrapped
+    // around Symfony's HttpKernel.
+    $response = $this->getHttpKernel()->handle($request, $type, $catch);
+    $response->prepare($request);
+    return $response;
   }
 
   public function terminate(Request $request, Response $response): void {
-    parent::terminate($request, $response);
+    // Delegates to the stacked kernel (only once preHandle() has run), then
+    // destructs services tagged 'needs_destruction'.
+    $this->getHttpKernel()->terminate($request, $response);
   }
 }
 ```
@@ -105,11 +111,11 @@ Drupal wraps the HttpKernel in a **middleware stack** (onion model). Each middle
 ```mermaid
 graph LR
     R[Request] --> A[StackedHttpKernel]
-    A --> M1[Session]
-    M1 --> M2[KernelPreHandle]
+    A --> M1[Negotiation]
+    M1 --> M2[ReverseProxy]
     M2 --> M3[PageCache]
-    M3 --> M4[Negotiation]
-    M4 --> M5[ReverseProxy]
+    M3 --> M4[KernelPreHandle]
+    M4 --> M5[Session]
     M5 --> HK[HttpKernel]
     HK --> M5
     M5 --> M4
@@ -120,27 +126,45 @@ graph LR
     A --> Res[Response]
 ```
 
-Middleware is registered via `core.services.yml` with the `http_middleware` tag:
+Middleware is registered with the `http_middleware` tag (in `core.services.yml` and module service files):
 
 ```yaml
 # core/core.services.yml (excerpt)
 services:
   http_middleware.session:
     class: Drupal\Core\StackMiddleware\Session
+    autowire: true
     tags:
-      - { name: http_middleware, priority: 300 }
-  http_middleware.page_cache:
-    class: Drupal\Core\StackMiddleware\PageCache
-    tags:
-      - { name: http_middleware, priority: 200, responder: true }
+      - { name: http_middleware, priority: 50 }
 ```
 
-!!! tip "Responder middleware"
-    Middleware tagged with `responder: true` runs on the response path as well as the request path. Page cache uses this to store responses.
+```yaml
+# core/modules/page_cache/page_cache.services.yml (excerpt)
+services:
+  http_middleware.page_cache:
+    class: Drupal\page_cache\StackMiddleware\PageCache
+    arguments: ['@cache.page', '@page_cache_request_policy', '@page_cache_response_policy']
+    tags:
+      - { name: http_middleware, priority: 200 }
+```
+
+Higher priority = outer layer (runs first on the request, last on the response). Core middleware in Drupal 11:
+
+| Service | Priority | Role |
+|---------|----------|------|
+| `http_middleware.ajax_page_state` | 500 | Expands the compressed `ajax_page_state` query parameter |
+| `http_middleware.negotiation` | 400 | Sets the request format |
+| `http_middleware.reverse_proxy` | 300 | Trusted proxy headers |
+| `http_middleware.cors` | 250 | Only when `cors.config` is enabled |
+| `http_middleware.page_cache` | 200 | `page_cache` module; serves cached pages before modules load |
+| `http_middleware.big_pipe` | 150 | `big_pipe` module; removes `Content-Length` from BigPipe responses |
+| `http_middleware.content_length` | 140 | Adds `Content-Length` |
+| `http_middleware.kernel_pre_handle` | 100 | `DrupalKernel::preHandle()` — loads all modules |
+| `http_middleware.session` | 50 | Starts the session |
 
 ## Routing phase
 
-After `KernelEvents::REQUEST` subscribers run, the router matches the path to a route:
+During `KernelEvents::REQUEST`, `RouterListener` (priority 32) asks the `router` service to match the path to a route; the access-aware router then runs the route's access checks:
 
 ```yaml
 # my_module.routing.yml
@@ -151,10 +175,9 @@ my_module.product_detail:
     _title: 'Product detail'
   requirements:
     _permission: 'access content'
+    _format: 'json'
     product: \d+
   methods: [GET]
-  options:
-    _format: 'json'
 ```
 
 ```php
@@ -267,7 +290,7 @@ final class ArticleListController extends ControllerBase {
 }
 ```
 
-`Drupal\Core\EventSubscriber\MainContentViewSubscriber` listens on `KernelEvents::VIEW` and wraps the render array in an HTML or JSON response based on the requested format.
+`Drupal\Core\EventSubscriber\MainContentViewSubscriber` listens on `KernelEvents::VIEW` and renders the array with the main content renderer chosen by the `_wrapper_format` query parameter (HTML by default; AJAX, dialog and modal otherwise). A render array returned for a non-HTML format such as JSON gets a 406 from `RenderArrayNonHtmlSubscriber`.
 
 ## Response event
 
@@ -326,8 +349,8 @@ final class RequestLogTerminateSubscriber implements EventSubscriberInterface {
   public function onTerminate(TerminateEvent $event): void {
     $request = $event->getRequest();
     $response = $event->getResponse();
-    \Drupal::logger('my_module')->info('@{method} {path} → {status}', [
-      '@method' => $request->getMethod(),
+    \Drupal::logger('my_module')->info('{method} {path} → {status}', [
+      'method' => $request->getMethod(),
       'path' => $request->getPathInfo(),
       'status' => $response->getStatusCode(),
     ]);
@@ -353,11 +376,11 @@ curl -s -H "Accept: application/vnd.api+json" \
 
 ```mermaid
 flowchart LR
-    A[GET /jsonapi/node/article/UUID] --> B[Router: jsonapi.entity]
+    A[GET /jsonapi/node/article/UUID] --> B["Router: jsonapi.node--article.individual"]
     B --> C[Access: entity access]
-    C --> D[JsonApiController]
+    C --> D[EntityResource controller]
     D --> E[Serializer + Normalizers]
-    E --> F[JsonResponse 200]
+    E --> F[ResourceResponse 200]
 ```
 
 ## Exception handling

@@ -72,8 +72,8 @@ drush en redis -y
 # Rebuild all caches
 drush cr
 
-# Inspect cache bins (with devel)
-drush php:eval "print_r(array_keys(\Drupal::cache('render')->getAll()));"
+# Inspect a bin's entries (database cache backend)
+drush sql:query "SELECT cid, expire FROM cache_render LIMIT 20"
 ```
 
 ## Headless implications
@@ -83,7 +83,7 @@ drush php:eval "print_r(array_keys(\Drupal::cache('render')->getAll()));"
 | Page cache | HTML pages | JSON:API responses |
 | Render cache | Twig blocks | API normalizers |
 | Cache tags | Auto on entities | Propagate to frontend |
-| Cache contexts | User/session | OAuth token context |
+| Cache contexts | User/session | Same contexts (`user.permissions`, `user`), resolved for the token's account |
 
 JSON:API and REST responses participate in Drupal's cache system when built with cacheable metadata:
 
@@ -121,5 +121,5 @@ $build['#cache']['max-age'] = 0;
 ## Related pages
 
 - [Headless Cache Invalidation](../headless/cache-invalidation.md) — frontend webhooks
-- [Symfony Cache](../symfony/cache.md) — underlying cache component
+- [Symfony Cache](../symfony/cache.md) — cache bins in custom code (core does not use `symfony/cache`)
 - [Custom JSON APIs](../headless/custom-json-apis.md) — CacheableJsonResponse

@@ -184,13 +184,21 @@ services:
       - '%my_module.http_timeout%'
 ```
 
-Override parameters in `settings.php` for environment-specific values:
+Override parameters per environment with a site-level services file loaded from `settings.php` (there is no `$container` in settings files):
 
 ```php
 <?php
 // settings.local.php
-$container->setParameter('my_module.sync_endpoint', 'https://staging-api.example.com/products');
+$settings['container_yamls'][] = $app_root . '/' . $site_path . '/services.local.yml';
 ```
+
+```yaml
+# sites/default/services.local.yml
+parameters:
+  my_module.sync_endpoint: 'https://staging-api.example.com/products'
+```
+
+Run `drush cr` after changing either file.
 
 ## Event subscribers
 
@@ -433,7 +441,7 @@ drush php:eval "echo get_class(\Drupal::service('my_module.product_manager'));"
 | Missing `@` on service ref | String passed to constructor | Use `@entity_type.manager` |
 | Wrong service ID | `ServiceNotFoundException` | Check spelling against `core.services.yml` |
 | Forgot `drush cr` | Old container | Always rebuild after YAML changes |
-| Circular arguments | Compile error | Refactor or use `lazy: true` |
+| Circular arguments | Compile error | Refactor, or use `lazy: true` with a generated proxy class |
 
 ## Related reading
 

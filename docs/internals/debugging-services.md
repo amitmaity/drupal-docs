@@ -62,9 +62,10 @@ echo $reflection->getFileName() . ':' . $reflection->getStartLine();
 
 ```bash
 drush php:eval "
-\$params = \Drupal::getContainer()->getParameterBag()->all();
-echo 'Site path: ' . \$params['site.path'] . PHP_EOL;
-echo 'Install profile: ' . \$params['install_profile'] . PHP_EOL;
+// The runtime container has getParameter()/hasParameter(), but no parameter bag.
+\$container = \Drupal::getContainer();
+echo 'Site path: ' . \$container->getParameter('site.path') . PHP_EOL;
+echo 'Install profile: ' . \$container->getParameter('install_profile') . PHP_EOL;
 "
 ```
 
@@ -106,15 +107,15 @@ foreach (\$ctor->getParameters() as \$param) {
 
 ```bash
 # On local
-drush php:eval "echo \Drupal::getContainer()->getParameter('container.build_id');" > /tmp/local-build-id.txt
+drush php:eval "\$ids = \Drupal::getContainer()->getServiceIds(); sort(\$ids); echo implode(PHP_EOL, \$ids);" > /tmp/local-services.txt
 
 # On staging (SSH)
-drush php:eval "echo \Drupal::getContainer()->getParameter('container.build_id');" > /tmp/staging-build-id.txt
+drush php:eval "\$ids = \Drupal::getContainer()->getServiceIds(); sort(\$ids); echo implode(PHP_EOL, \$ids);" > /tmp/staging-services.txt
 
-diff /tmp/local-build-id.txt /tmp/staging-build-id.txt
+diff /tmp/local-services.txt /tmp/staging-services.txt
 ```
 
-Different build IDs mean different compiled containers — expected after different module sets or service YAML.
+Differences mean the compiled containers differ — expected after different module sets or service YAML.
 
 ## Common errors and fixes
 
@@ -155,7 +156,7 @@ services:
     arguments: ['@my_module.service_a']
 ```
 
-Fix by introducing a third service, using `lazy: true`, or refactoring to break the cycle.
+Fix by introducing a third service, refactoring to break the cycle, or making one side lazy (`lazy: true` in Drupal needs a generated proxy class — see [Lazy services](service-container.md#lazy-services)).
 
 ### Service has wrong class
 
@@ -181,20 +182,23 @@ See [Tagged Services](../dependency-injection/tagged-services.md) for tag inspec
 
 ## Create a debug command
 
-For repeated debugging, add a custom Drush command:
+For repeated debugging, add a custom Drush command. Drush 12+ discovers command classes in `src/Drush/Commands/` and injects services through `AutowireTrait` — no `drush.services.yml` (deprecated) is needed:
 
 ```php
 <?php
 
 declare(strict_types=1);
 
-namespace Drupal\my_module\Commands;
+namespace Drupal\my_module\Drush\Commands;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drush\Attributes as CLI;
+use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
 
 final class ProductDebugCommands extends DrushCommands {
+
+  use AutowireTrait;
 
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -217,19 +221,13 @@ final class ProductDebugCommands extends DrushCommands {
 }
 ```
 
-```yaml
-# drush.services.yml
-services:
-  my_module.commands:
-    class: Drupal\my_module\Commands\ProductDebugCommands
-    arguments: ['@entity_type.manager']
-    tags:
-      - { name: drush.command }
-```
-
 ```bash
+# File: src/Drush/Commands/ProductDebugCommands.php
 drush my-module:products
 ```
+
+!!! note "Drush 13.7+ / 14"
+    Attribute-based `DrushCommands` classes still work but are deprecated in favour of Symfony Console commands (`#[AsCommand]` classes ending in `Command`). See the [Drush command authoring docs](https://www.drush.org/latest/commands/).
 
 ## Debugging in a browser (temporary)
 
@@ -258,7 +256,7 @@ final class DebugController extends ControllerBase {
     $mine = array_values(array_filter($ids, fn(string $id): bool => str_starts_with($id, 'my_module')));
 
     return new JsonResponse([
-      'build_id' => \Drupal::getContainer()->getParameter('container.build_id'),
+      'service_count' => count($ids),
       'my_module_services' => $mine,
     ]);
   }

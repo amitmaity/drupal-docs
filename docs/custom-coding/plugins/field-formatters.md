@@ -135,7 +135,7 @@ namespace Drupal\example_module\Plugin\Field\FieldFormatter;
 
 use Drupal\Core\Field\Attribute\FieldFormatter;
 use Drupal\Core\Field\FieldItemListInterface;
-use Drupal\Core\Field\FormatterBase;
+use Drupal\Core\Field\Plugin\Field\FieldFormatter\EntityReferenceFormatterBase;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 
 #[FieldFormatter(
@@ -143,21 +143,18 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
   label: new TranslatableMarkup('Author link'),
   field_types: ['entity_reference'],
 )]
-final class AuthorLinkFormatter extends FormatterBase {
+final class AuthorLinkFormatter extends EntityReferenceFormatterBase {
 
   /**
    * {@inheritdoc}
    */
   public function viewElements(FieldItemListInterface $items, $langcode): array {
     $elements = [];
-    $entity = $items->getEntity();
 
-    foreach ($items as $delta => $item) {
-      $referenced = $item->entity;
-      if ($referenced === NULL) {
-        continue;
-      }
-
+    // getEntitiesToView() skips missing targets, applies the 'view' access
+    // check and translation, and records access cacheability that the base
+    // class merges into the output.
+    foreach ($this->getEntitiesToView($items, $langcode) as $delta => $referenced) {
       $elements[$delta] = [
         '#type' => 'link',
         '#title' => $referenced->label(),
@@ -168,18 +165,14 @@ final class AuthorLinkFormatter extends FormatterBase {
       ];
     }
 
-    if ($entity !== NULL) {
-      $elements['#cache']['tags'] = array_merge(
-        $elements['#cache']['tags'] ?? [],
-        $entity->getCacheTags(),
-      );
-    }
-
     return $elements;
   }
 
 }
 ```
+
+!!! warning "Reference access"
+    Reading `$item->entity` directly in a plain `FormatterBase` bypasses access checks and can leak labels of unpublished or restricted entities. Extend `EntityReferenceFormatterBase` for reference fields.
 
 !!! tip "Pair with custom field types"
     See [Custom Field Types](../custom-field-types.md) for a complete field type + widget + formatter example.

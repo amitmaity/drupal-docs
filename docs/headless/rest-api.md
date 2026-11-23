@@ -22,26 +22,39 @@ Drupal ships REST resources for common entity operations:
 | User | `entity:user` | GET, POST, PATCH, DELETE |
 | Taxonomy term | `entity:taxonomy_term` | GET, POST, PATCH, DELETE |
 
-Enable a resource via configuration:
+Enable a resource via configuration. REST resources are `rest_resource_config` config entities: the config name is `rest.resource.<id>` and the ID replaces the plugin ID's `:` with `.` (`entity:node` → `entity.node`). Write the entity as YAML and import it:
 
 ```bash
 # Enable GET + POST for nodes via REST
-drush config:set rest.resource.entity.node GET \
-  --input-format=yaml \
-  '{
-    "id": "entity:node",
-    "plugin_id": "entity:node",
-    "granularity": "resource",
-    "configuration": {
-      "methods": ["GET", "POST"],
-      "formats": ["json"],
-      "authentication": ["cookie", "basic_auth"]
-    },
-    "status": true
-  }'
+# Run from the project root (where composer.json lives)
+mkdir -p config/rest-partial
+cat > config/rest-partial/rest.resource.entity.node.yml <<'YAML'
+langcode: en
+status: true
+dependencies:
+  module:
+    - basic_auth
+    - node
+    - serialization
+    - user
+id: entity.node
+plugin_id: 'entity:node'
+granularity: resource
+configuration:
+  methods:
+    - GET
+    - POST
+  formats:
+    - json
+  authentication:
+    - basic_auth
+    - cookie
+YAML
+
+drush config:import --partial --source="$(pwd)/config/rest-partial" -y
 ```
 
-Or create `config/install/rest.resource.entity.node.yml` in a custom module.
+Or ship the same file as `config/install/rest.resource.entity.node.yml` in a custom module.
 
 ## Request and response format
 
@@ -77,7 +90,6 @@ Build a REST endpoint that returns aggregated dashboard data.
 ```
 modules/custom/my_api/
 ├── my_api.info.yml
-├── my_api.permissions.yml
 ├── my_api.routing.yml          # optional — REST uses plugin routes
 ├── my_api.services.yml
 └── src/
@@ -98,12 +110,12 @@ dependencies:
   - drupal:serialization
 ```
 
-### my_api.permissions.yml
+### Permissions
 
-```yaml
-access dashboard api:
-  title: 'Access dashboard REST API'
-  description: 'Allows access to the custom dashboard REST endpoint.'
+You do not need a `my_api.permissions.yml` for this resource. `ResourceBase` generates one permission per method, `restful <method> <plugin_id>`, and the REST routes require it. Grant them to the roles that should call the endpoint:
+
+```bash
+drush role:perm:add editor 'restful get dashboard_summary,restful post dashboard_summary'
 ```
 
 ### DashboardResource.php
@@ -209,9 +221,12 @@ final class DashboardResource extends ResourceBase {
 
     $response = new ResourceResponse($data, 200);
 
+    // The payload contains the current user's uid and name, so it must vary
+    // per user ('user'), not just per permission set — otherwise Dynamic Page
+    // Cache serves one user's data to everyone with the same roles.
     $cacheMetadata = (new CacheableMetadata())
       ->addCacheTags($cacheTags)
-      ->addCacheContexts(['user.permissions'])
+      ->addCacheContexts(['user'])
       ->setCacheMaxAge(300);
 
     $response->addCacheableDependency($cacheMetadata);
@@ -256,8 +271,10 @@ langcode: en
 status: true
 dependencies:
   module:
+    - basic_auth
     - my_api
     - serialization
+    - user
 id: dashboard_summary
 plugin_id: dashboard_summary
 granularity: resource
@@ -268,6 +285,7 @@ configuration:
   formats:
     - json
   authentication:
+    - basic_auth   # local development only — see the warning above
     - cookie
 ```
 
@@ -279,6 +297,8 @@ drush cr
 ```
 
 ### Test the endpoint
+
+The `-u` examples use the `basic_auth` provider enabled above, so no CSRF token is needed. If a browser calls the endpoint with the session cookie (`cookie` provider), POST requests must also send an `X-CSRF-Token` header obtained from `/session/token`.
 
 ```bash
 # GET dashboard
