@@ -6,7 +6,7 @@ This section covers the foundational concepts you need before writing custom cod
 
 - **[What Changed in Drupal 11](what-changed.md)** — PHP 8.3+, Symfony 7, OOP hooks, removed modules
 - **[Drupal 11 Architecture](architecture.md)** — layered architecture, kernel, subsystems
-- **[Modern PHP Standards](modern-php.md)** — typed properties, enums, attributes, readonly
+- **[Modern PHP Standards](modern-php.md)** — typed properties, enums, attributes, readonly (see also the full [PHP 5 to 8](../php/index.md) guide)
 - **[Symfony Foundation](symfony-foundation.md)** — why Drupal is built on Symfony components
 - **[Composer-First Development](composer-first.md)** — managing Drupal as a Composer project
 - **[Why Headless Drupal](why-headless.md)** — decoupled vs traditional, when to go headless

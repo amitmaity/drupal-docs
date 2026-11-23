@@ -65,6 +65,14 @@ nav:
     - Symfony Foundation: intro/symfony-foundation.md
     - Composer-First Development: intro/composer-first.md
     - Why Headless Drupal: intro/why-headless.md
+  - PHP 5 to 8:
+    - php/index.md
+    - PHP 7.0 – 7.4: php/php-7.md
+    - PHP 8.0 – 8.3: php/php-8.md
+    - PHP 8.4 – 8.6: php/php-8-4-plus.md
+    - Breaking Changes: php/breaking-changes.md
+    - Upgrade Strategy: php/upgrading.md
+    - Cheat Sheet: php/cheat-sheet.md
   - Getting Started:
     - getting-started/index.md
     - Fresh Installation: getting-started/installation.md

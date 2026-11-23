@@ -2,6 +2,9 @@
 
 Drupal 11 embraces modern PHP 8.3+ features. Writing idiomatic PHP makes your custom modules cleaner, safer, and easier to test.
 
+!!! info "Coming from PHP 5 or 7?"
+    This page shows modern PHP in a Drupal context. For a framework-neutral, version-by-version tour of everything that changed since PHP 5, plus breaking changes and an upgrade plan, see [PHP 5 to 8](../php/index.md).
+
 ## Strict typing
 
 Always declare strict types in new files:

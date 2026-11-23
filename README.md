@@ -1,6 +1,6 @@
 # Drupal 11 Headless & Custom Coding Guide
 
-A comprehensive developer guide for Drupal 11, focused on headless/decoupled architecture, custom module development, and Symfony components.
+A comprehensive developer guide for Drupal 11, focused on headless/decoupled architecture, custom module development, and Symfony components. It also includes a framework-neutral guide to the PHP language changes from PHP 5 to PHP 8.
 
 **Live site:** [https://amitmaity.github.io/drupal-docs/](https://amitmaity.github.io/drupal-docs/)
 
@@ -36,6 +36,7 @@ Output is written to `site/`.
 | Directory | Content |
 |-----------|---------|
 | `docs/intro/` | What changed in D11, architecture, why headless |
+| `docs/php/` | PHP 5 to 8: language changes by version, breaking changes, upgrade strategy, cheat sheet (framework-neutral) |
 | `docs/getting-started/` | Installation, Composer workflows |
 | `docs/internals/` | Bootstrap, request lifecycle, core systems |
 | `docs/dependency-injection/` | DI patterns and service container |

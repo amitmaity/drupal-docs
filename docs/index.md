@@ -10,6 +10,7 @@ This guide teaches you how Drupal works under the hood, how every Symfony compon
 - Drupal developers transitioning to headless/decoupled projects
 - Frontend developers consuming Drupal APIs (Next.js, React, Vue)
 - Teams evaluating Drupal 11 for a decoupled CMS strategy
+- Any PHP developer moving a codebase, or their own habits, from PHP 5 or 7 to PHP 8
 
 ## Prerequisites
 
@@ -23,6 +24,7 @@ This guide teaches you how Drupal works under the hood, how every Symfony compon
 | Section | Topics |
 |---------|--------|
 | [Introduction](intro/index.md) | What changed in D11, architecture, modern PHP, why headless |
+| [PHP 5 to 8](php/index.md) | Every language change from PHP 5.6 to 8.6, breaking changes, upgrade strategy (framework-neutral) |
 | [Getting Started](getting-started/index.md) | Fresh install, Composer workflows, Drush |
 | [Drupal Internals](internals/index.md) | Bootstrap, request lifecycle, core systems |
 | [Dependency Injection](dependency-injection/index.md) | Service container, tagged services, decoration |
